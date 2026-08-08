@@ -1,0 +1,4 @@
+# Development-only files are not needed in the Registry archive.
+.github/
+tests/
+pytest.ini

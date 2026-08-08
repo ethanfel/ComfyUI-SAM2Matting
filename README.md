@@ -55,8 +55,16 @@ video workflow.
 
 ## Installation
 
-Place this repository under `ComfyUI/custom_nodes/`, then install its Python
-dependencies with the same Python environment that runs ComfyUI:
+Install from ComfyUI-Manager by searching for **SAM2Matting Video**, or with
+Comfy CLI:
+
+```bash
+comfy node install sam2matting-video
+```
+
+For a manual installation, place this repository under
+`ComfyUI/custom_nodes/`, then install its Python dependencies with the same
+Python environment that runs ComfyUI:
 
 ```bash
 python -m pip install -r requirements.txt
