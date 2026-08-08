@@ -1,0 +1,12 @@
+# ComfyUI owns the torch/torchvision versions; do not replace them here.
+numpy
+pillow
+tqdm
+hydra-core
+iopath
+timm
+loguru
+einops
+ftfy
+regex
+psutil
