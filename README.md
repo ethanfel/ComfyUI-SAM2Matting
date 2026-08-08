@@ -9,18 +9,28 @@ frames, and a checkerboard preview.
 
 ## Which model should I use?
 
-| Model | Best for | Target | Trade-off | Included here |
-| --- | --- | --- | --- | --- |
-| `sam2.1_tiny` | Fast previews and lower VRAM use | Open-world subjects | Smallest SAM2Matting option | Yes |
-| `sam2.1_base_plus` | Most workflows | Open-world subjects | Recommended quality/speed balance | Yes, default |
-| `sam3` | Trying the largest upstream tracker | Open-world subjects | Highest compute cost; CUDA required | Yes |
-| [MatAnyone2](https://github.com/pq-yang/MatAnyone2) | Dedicated human video matting | People | Separate model and ComfyUI implementation | No |
+| Model | Best for | System RAM | Peak VRAM, 720p / 1080p | Speed, 720p / 1080p | Included here |
+| --- | --- | ---: | ---: | ---: | --- |
+| `sam2.1_tiny` | Fast previews, any subject | 16 GB+ | 3.08 / 3.61 GB | 40.46 / 40.31 FPS | Yes |
+| `sam2.1_base_plus` | Best default, any subject | 16 GB+ | 3.42 / 3.82 GB | 30.40 / 30.36 FPS | Yes, default |
+| `sam3` | Largest tracker, any subject | 24 GB+ | 4.80 / 4.91 GB | 9.09 / 9.07 FPS | Yes |
+| [MatAnyone2](https://github.com/pq-yang/MatAnyone2) | Dedicated human matting | 16 GB+ | 3.10 / 13.67 GB | 21.94 / 9.93 FPS | No |
+
+VRAM and speed are the upstream
+[SAM2Matting paper's](https://arxiv.org/abs/2606.27339) VideoMatte results on
+one NVIDIA A6000, not measurements from this ComfyUI node. Real performance
+depends on the GPU, clip, PyTorch build, and memory mode.
+
+System RAM values are conservative starting points rather than benchmark
+results. Clip length is the main factor: one decoded float32 RGB frame uses
+about 10.5 MiB at 720p or 23.7 MiB at 1080p, before mattes, previews, and other
+ComfyUI nodes. Use 32 GB or more for longer clips.
 
 SAM2Matting is designed for varied subjects such as people, animals, anime,
 and translucent objects. MatAnyone2 is specifically presented as a human video
-matting model. They have not published a direct, like-for-like comparison, so
-choose by subject and workflow rather than treating this table as a quality
-ranking.
+matting model. The hardware figures compare efficiency, not matte quality, so
+choose by subject and test representative footage before committing to a long
+render.
 
 ## Install
 
