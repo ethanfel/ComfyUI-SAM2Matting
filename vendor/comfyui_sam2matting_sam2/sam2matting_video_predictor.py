@@ -623,7 +623,7 @@ class SAM2VideoPredictor(SAM2MattingBase):
         prev_sam_mask_logits=None,
     ):                                                                 
         (
-            _,
+            active_image,
             backbone_fpn,
             current_vision_feats,
             current_vision_pos_embeds,
@@ -660,12 +660,11 @@ class SAM2VideoPredictor(SAM2MattingBase):
             
         hight_features = backbone_fpn["backbone_fpn"]
         mask_inputs = (pred_masks_gpu > 0).to(dtype=torch.float16)
-        img = inference_state["images"][frame_idx].unsqueeze(0)
 
         alpha, alpha_upscaled, unknown_region = self._forward_alpha_heads(
             mask_inputs=mask_inputs,
             high_res_features=hight_features,
-            image=img,
+            image=active_image,
         )
         alpha=F.interpolate(
             alpha, size=(inference_state["video_height"], inference_state["video_width"]), mode="bilinear", align_corners=False

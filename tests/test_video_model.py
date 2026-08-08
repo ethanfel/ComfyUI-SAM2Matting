@@ -100,6 +100,70 @@ def test_private_sam2_config_ignores_an_existing_hydra_search_path(tmp_path):
     assert cfg.model._target_.startswith(f"{SAM2_VENDOR_PACKAGE}.")
 
 
+def test_sam2_matting_head_uses_cuda_ready_cached_frame_not_offloaded_source():
+    _activate_vendored_package(SAM2_VENDOR_PACKAGE)
+    from comfyui_sam2matting_sam2.sam2matting_video_predictor import (
+        SAM2VideoPredictor,
+    )
+
+    class FakePredictor:
+        fill_hole_area = 0
+
+        def __init__(self):
+            self.active_image = torch.ones(1, 3, 4, 6)
+            self.alpha_image = None
+
+        def _get_image_feature(self, state, frame_idx, batch_size):
+            return (
+                self.active_image,
+                {"backbone_fpn": [torch.ones(1, 1, 1, 1)]},
+                [],
+                [],
+                [],
+            )
+
+        def track_step(self, **kwargs):
+            return {
+                "maskmem_features": None,
+                "maskmem_pos_enc": [torch.zeros(1, 1, 1, 1)],
+                "pred_masks": torch.ones(1, 1, 2, 2),
+                "obj_ptr": torch.zeros(1, 1),
+                "object_score_logits": torch.zeros(1, 1),
+            }
+
+        def _forward_alpha_heads(self, *, image, **kwargs):
+            self.alpha_image = image
+            alpha = torch.ones(1, 1, 2, 2)
+            return alpha, alpha, None
+
+        def _get_maskmem_pos_enc(self, state, current_out):
+            return current_out["maskmem_pos_enc"]
+
+    predictor = FakePredictor()
+    state = {
+        "images": [torch.zeros(3, 4, 6)],
+        "storage_device": torch.device("cpu"),
+        "num_frames": 1,
+        "video_height": 4,
+        "video_width": 6,
+    }
+
+    SAM2VideoPredictor._run_single_frame_inference(
+        predictor,
+        inference_state=state,
+        output_dict={},
+        frame_idx=0,
+        batch_size=1,
+        is_init_cond_frame=True,
+        point_inputs=None,
+        mask_inputs=None,
+        reverse=False,
+        run_mem_encoder=False,
+    )
+
+    assert predictor.alpha_image is predictor.active_image
+
+
 def test_prepare_seed_mask_selects_matching_video_frame_and_white_is_foreground():
     masks = torch.zeros(3, 2, 2)
     masks[1, 0, 1] = 1.0
