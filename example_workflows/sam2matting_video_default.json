@@ -20,7 +20,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "SAM2Matting — default video workflow\n\n1. Upload a video and a black/white seed-mask image. White = foreground.\n2. The seed mask must match the video frame selected by mask_frame (zero-based).\n3. The loader and both encoders are set to 24 fps. Change all three together if needed.\n4. frame_load_cap is 48 for a quick first test; use 0 to process the complete clip.\n\nOutputs: transparent VP9 WebM, checkerboard H.264 preview, and an in-UI matte preview. Invert Mask is intentional: it converts white-foreground opacity to ComfyUI's inverse-mask convention before Join Image with Alpha."
+        "SAM2Matting — default video workflow\n\n1. Upload a video and a black/white seed-mask image. White = foreground.\n2. The seed mask must match the video frame selected by mask_frame (zero-based).\n3. The loader and both encoders are set to 24 fps. Change all three together if needed.\n4. frame_load_cap is 48 for a quick first test; use 0 to process the complete clip.\n\nOutputs: transparent VP9 WebM and checkerboard H.264 preview. Full-batch Preview Image nodes are intentionally omitted to avoid unnecessary RAM use. Mask to Image is included as an unconnected black-background/white-foreground conversion helper. Invert Mask converts white-foreground opacity to ComfyUI's inverse-mask convention before Join Image with Alpha."
       ],
       "color": "#243447",
       "bgcolor": "#34506b"
@@ -321,7 +321,6 @@
           "name": "preview",
           "type": "IMAGE",
           "links": [
-            8,
             11
           ],
           "shape": 3,
@@ -419,33 +418,6 @@
       "widgets_values": []
     },
     {
-      "id": 7,
-      "type": "PreviewImage",
-      "pos": [
-        810,
-        400
-      ],
-      "size": [
-        390,
-        330
-      ],
-      "flags": {},
-      "order": 8,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 8
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "Node name for S&R": "PreviewImage"
-      },
-      "widgets_values": []
-    },
-    {
       "id": 8,
       "type": "MaskToImage",
       "pos": [
@@ -472,42 +444,13 @@
         {
           "name": "IMAGE",
           "type": "IMAGE",
-          "links": [
-            9
-          ],
+          "links": null,
           "shape": 3,
           "slot_index": 0
         }
       ],
       "properties": {
         "Node name for S&R": "MaskToImage"
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 9,
-      "type": "PreviewImage",
-      "pos": [
-        820,
-        875
-      ],
-      "size": [
-        380,
-        300
-      ],
-      "flags": {},
-      "order": 9,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 9
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "Node name for S&R": "PreviewImage"
       },
       "widgets_values": []
     },
@@ -802,22 +745,6 @@
       "MASK"
     ],
     [
-      8,
-      4,
-      2,
-      7,
-      0,
-      "IMAGE"
-    ],
-    [
-      9,
-      8,
-      0,
-      9,
-      0,
-      "IMAGE"
-    ],
-    [
       10,
       6,
       0,
@@ -879,7 +806,7 @@
     },
     {
       "id": 3,
-      "title": "3. Inspect and encode outputs",
+      "title": "3. Convert and encode outputs",
       "bounding": [
         785,
         -65,
