@@ -9,6 +9,7 @@ from hydra import initialize_config_dir
 
 from video_model import (
     SAM2_VENDOR_PACKAGE,
+    SAM3_VENDOR_PACKAGE,
     SAM2MattingVideoModel,
     VENDOR_DIR,
     _activate_vendored_package,
@@ -84,6 +85,40 @@ def test_vendored_sam2_has_private_namespace_and_coexists_with_installed_sam2(
 
     assert sys.modules["sam2"] is external_sam2
     assert Path(private_sam2.__file__).resolve().is_relative_to(VENDOR_DIR)
+
+
+def test_vendored_sam3_has_private_namespace_and_wins_path_precedence(
+    monkeypatch, tmp_path
+):
+    external_sam3 = types.ModuleType("sam3")
+    external_sam3.__file__ = "/external/site-packages/sam3/__init__.py"
+    monkeypatch.setitem(sys.modules, "sam3", external_sam3)
+
+    decoy_root = tmp_path / "decoy"
+    decoy_package = decoy_root / SAM3_VENDOR_PACKAGE
+    decoy_package.mkdir(parents=True)
+    (decoy_package / "__init__.py").write_text("SOURCE = 'decoy'\n")
+    vendor_path = str(VENDOR_DIR)
+    monkeypatch.setattr(
+        sys,
+        "path",
+        [str(decoy_root), vendor_path, *sys.path],
+    )
+
+    _activate_vendored_package(SAM3_VENDOR_PACKAGE)
+    spec = importlib.machinery.PathFinder.find_spec(SAM3_VENDOR_PACKAGE, sys.path)
+
+    assert sys.modules["sam3"] is external_sam3
+    assert sys.path[0] == vendor_path
+    assert sys.path.count(vendor_path) == 1
+    assert spec is not None
+    assert Path(spec.origin).resolve().is_relative_to(VENDOR_DIR)
+    assert (
+        VENDOR_DIR
+        / SAM3_VENDOR_PACKAGE
+        / "model"
+        / "sam3matting_video_predictor.py"
+    ).is_file()
 
 
 def test_private_sam2_config_ignores_an_existing_hydra_search_path(tmp_path):
@@ -221,7 +256,9 @@ def test_sam3_text_mask_reports_when_prompt_finds_nothing():
 
 
 def test_sam3_text_seed_uses_selected_frame_and_returns_mask(monkeypatch):
-    processor_module = types.ModuleType("sam3.model.sam3_image_processor")
+    processor_module = types.ModuleType(
+        f"{SAM3_VENDOR_PACKAGE}.model.sam3_image_processor"
+    )
 
     class FakeProcessor:
         def __init__(self, model, device, confidence_threshold):
@@ -243,15 +280,19 @@ def test_sam3_text_seed_uses_selected_frame_and_returns_mask(monkeypatch):
             return state
 
     processor_module.Sam3Processor = FakeProcessor
-    sam3_package = types.ModuleType("sam3")
+    sam3_package = types.ModuleType(SAM3_VENDOR_PACKAGE)
     sam3_package.__path__ = []
-    sam3_model_package = types.ModuleType("sam3.model")
+    sam3_model_package = types.ModuleType(f"{SAM3_VENDOR_PACKAGE}.model")
     sam3_model_package.__path__ = []
-    monkeypatch.setitem(sys.modules, "sam3", sam3_package)
-    monkeypatch.setitem(sys.modules, "sam3.model", sam3_model_package)
+    monkeypatch.setitem(sys.modules, SAM3_VENDOR_PACKAGE, sam3_package)
     monkeypatch.setitem(
         sys.modules,
-        "sam3.model.sam3_image_processor",
+        f"{SAM3_VENDOR_PACKAGE}.model",
+        sam3_model_package,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        f"{SAM3_VENDOR_PACKAGE}.model.sam3_image_processor",
         processor_module,
     )
 

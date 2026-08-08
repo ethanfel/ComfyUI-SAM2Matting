@@ -9,6 +9,7 @@ SAM2/SAM3 propagation outputs into one ordered alpha batch.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import os
 import sys
 import threading
@@ -26,6 +27,7 @@ import torch.nn.functional as F
 PACKAGE_DIR = Path(__file__).resolve().parent
 VENDOR_DIR = PACKAGE_DIR / "vendor"
 SAM2_VENDOR_PACKAGE = "comfyui_sam2matting_sam2"
+SAM3_VENDOR_PACKAGE = "comfyui_sam2matting_sam3"
 
 VARIANT_INFO = {
     "sam2.1_base_plus": {
@@ -119,8 +121,13 @@ def _activate_vendored_package(package_name: str) -> None:
                 f"from {existing_file}. Restart ComfyUI with only one {package_name} "
                 "implementation enabled to avoid mixing incompatible model code."
             ) from exc
-    if vendor_path not in sys.path:
-        sys.path.insert(0, vendor_path)
+    # Other custom nodes can insert paths ahead of ours after startup. Merely
+    # checking for membership is therefore insufficient: an unrelated package
+    # with the same import name can still win. Keep one authoritative entry at
+    # the front and invalidate cached import-directory listings.
+    sys.path[:] = [entry for entry in sys.path if entry != vendor_path]
+    sys.path.insert(0, vendor_path)
+    importlib.invalidate_caches()
 
 
 def _device_from_predictor(predictor, fallback: torch.device) -> torch.device:
@@ -515,9 +522,9 @@ class SAM2MattingVideoModel:
     def _build_sam3(self, checkpoint_path: str):
         if self.device.type != "cuda":
             raise RuntimeError("The upstream SAM3 video predictor currently requires CUDA.")
-        _activate_vendored_package("sam3")
+        _activate_vendored_package(SAM3_VENDOR_PACKAGE)
         from iopath.common.file_io import g_pathmgr
-        from sam3.model.sam3matting_video_predictor import (
+        from comfyui_sam2matting_sam3.model.sam3matting_video_predictor import (
             build_sam3matting_video_predictor,
         )
 
@@ -554,10 +561,10 @@ class SAM2MattingVideoModel:
         if self.checkpoint_path is None:
             raise RuntimeError("The SAM3 text model has no checkpoint path")
         if self._sam3_text_model is None:
-            _activate_vendored_package("sam3")
-            from sam3.model_builder import build_sam3_image_model
+            _activate_vendored_package(SAM3_VENDOR_PACKAGE)
+            from comfyui_sam2matting_sam3.model_builder import build_sam3_image_model
 
-            bpe_path = VENDOR_DIR / "sam3" / "bpe_simple_vocab_16e6.txt.gz"
+            bpe_path = VENDOR_DIR / SAM3_VENDOR_PACKAGE / "bpe_simple_vocab_16e6.txt.gz"
             if not bpe_path.is_file():
                 raise FileNotFoundError(f"SAM3 tokenizer vocabulary not found: {bpe_path}")
             self._sam3_text_model = build_sam3_image_model(
@@ -638,7 +645,9 @@ class SAM2MattingVideoModel:
             try:
                 text_model = self._get_sam3_text_model()
                 _move_module_and_tensor_caches(text_model, self.device)
-                from sam3.model.sam3_image_processor import Sam3Processor
+                from comfyui_sam2matting_sam3.model.sam3_image_processor import (
+                    Sam3Processor,
+                )
 
                 with torch.inference_mode(), _autocast_context(self.device):
                     processor = Sam3Processor(
