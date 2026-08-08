@@ -1,157 +1,121 @@
 # ComfyUI-SAM2Matting
 
-Video-first ComfyUI nodes for
-[FudanCVL SAM2Matting](https://github.com/FudanCVL/SAM2Matting). One ComfyUI
-`IMAGE` batch is treated as one ordered clip: the node creates one tracker
-state, applies a foreground mask on a selected frame, and propagates that state
-through the complete sequence. It does **not** run the image predictor on each
-frame independently.
+Video matting for ComfyUI using
+[FudanCVL SAM2Matting](https://github.com/FudanCVL/SAM2Matting).
 
-## Nodes
+Give the node a video and one rough foreground mask. It tracks the selected
+subject through the clip and returns a soft alpha matte, the original RGB
+frames, and a checkerboard preview.
 
-### Load SAM2Matting Video Model
+## Which model should I use?
 
-- `variant`
-  - `sam2.1_base_plus` — default quality/speed balance
-  - `sam2.1_tiny` — fastest and lowest VRAM
-  - `sam3` — largest model and highest dependency/compute cost
-- `compile_model` — opt-in image-backbone compilation; the first run can take a
-  long time
+| Model | Best for | Target | Trade-off | Included here |
+| --- | --- | --- | --- | --- |
+| `sam2.1_tiny` | Fast previews and lower VRAM use | Open-world subjects | Smallest SAM2Matting option | Yes |
+| `sam2.1_base_plus` | Most workflows | Open-world subjects | Recommended quality/speed balance | Yes, default |
+| `sam3` | Trying the largest upstream tracker | Open-world subjects | Highest compute cost; CUDA required | Yes |
+| [MatAnyone2](https://github.com/pq-yang/MatAnyone2) | Dedicated human video matting | People | Separate model and ComfyUI implementation | No |
 
-Checkpoints download on first use to `ComfyUI/models/sam2matting/`:
+SAM2Matting is designed for varied subjects such as people, animals, anime,
+and translucent objects. MatAnyone2 is specifically presented as a human video
+matting model. They have not published a direct, like-for-like comparison, so
+choose by subject and workflow rather than treating this table as a quality
+ranking.
 
-- `SAM2Matting-SAM2.1Base+.pt`
-- `SAM2Matting-SAM2.1Tiny.pt`
-- `SAM2Matting-SAM3.pt`
+## Install
 
-### SAM2Matting Video
-
-Inputs:
-
-- `model` — loaded video model
-- `images` — one ordered `IMAGE` batch representing one clip
-- `initial_mask` — one foreground `MASK`, or a mask batch matching the frame
-  count
-- `mask_frame` — frame receiving the seed mask
-- `mask_threshold` — threshold applied after resizing the mask; white is
-  foreground
-- `memory_mode`
-  - `balanced` — source frames stay on CPU; temporal state stays on the model
-    device
-  - `low_vram` — source frames and temporal state are offloaded to CPU
-  - `maximum_speed` — preprocessed source frames and temporal state stay on the
-    model device
-
-Outputs:
-
-- `alpha` — ordered `[frames, height, width]` `MASK` batch in `[0, 1]`
-- `foreground_rgb` — the original, unpremultiplied RGB frames
-- `preview` — RGB composited over a checkerboard
-
-The foreground output intentionally remains unpremultiplied. Connect
-`foreground_rgb` and `alpha` to ComfyUI's alpha-join/compositing nodes. Encoding,
-frame rate, and audio remain the responsibility of Video Helper Suite or another
-video workflow.
-
-## Installation
-
-Install from ComfyUI-Manager by searching for **SAM2Matting Video**, or with
-Comfy CLI:
+Search for **SAM2Matting Video** in ComfyUI-Manager, or run:
 
 ```bash
 comfy node install sam2matting-video
 ```
 
-For a manual installation, place this repository under
-`ComfyUI/custom_nodes/`, then install its Python dependencies with the same
-Python environment that runs ComfyUI:
+For a manual install:
 
 ```bash
+cd ComfyUI/custom_nodes
+git clone https://github.com/ethanfel/ComfyUI-SAM2Matting.git
+cd ComfyUI-SAM2Matting
 python -m pip install -r requirements.txt
 ```
 
-Restart ComfyUI. The nodes are in `SAM2Matting/video`.
+Restart ComfyUI. The nodes appear under `SAM2Matting/video`.
 
-Do not install the official project's pinned `torch`, `torchvision`, or
-`torch-tensorrt` versions over ComfyUI's environment. This package deliberately
-leaves torch version management to ComfyUI.
+The required checkpoint downloads automatically on first use to
+`ComfyUI/models/sam2matting/`. Do not replace ComfyUI's existing PyTorch
+installation with the versions pinned by the upstream research repository.
 
-## Typical workflow
+## Quick start
 
-1. Load or decode a video as an ordered `IMAGE` batch.
-2. Produce or paint a rough white-foreground mask for one frame.
-3. Set `mask_frame` to that frame's zero-based index.
-4. Run `SAM2Matting Video`.
-5. Inspect `preview`, then combine `foreground_rgb` with `alpha` and encode the
-   result using your existing video nodes.
+1. Load a video as one ordered ComfyUI `IMAGE` batch.
+2. Paint or generate a black-and-white mask for one frame. White is foreground.
+3. Load `sam2.1_base_plus` with **Load SAM2Matting Video Model**.
+4. Connect the video and mask to **SAM2Matting Video**.
+5. Set `mask_frame` to the zero-based frame matching the mask, then run.
 
-If `initial_mask` contains one mask, it seeds `mask_frame`. If its batch length
-matches the video, the mask at `mask_frame` is selected. Other mask batch sizes
-are rejected rather than silently repeated.
-
-### Default video workflow
-
-Drag
+For a ready-made example, drag
 [`example_workflows/sam2matting_video_default.json`](example_workflows/sam2matting_video_default.json)
 onto ComfyUI. It uses
 [Video Helper Suite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)
-to load and encode the clip, and includes:
+and produces matte previews, a checkerboard preview video, and a transparent
+VP9 WebM.
 
-- a 48-frame test cap and matching 24 fps load/encode settings
-- a grayscale matte preview and checkerboard compositing preview
-- a transparent VP9 WebM output using `yuva420p`
-- an H.264 checkerboard preview with the source audio
+The example is capped at 48 frames for a quick first test. Set
+`frame_load_cap` to `0` to process the complete video.
 
-Select your video and a mask image, then set `mask_frame` to the matching
-zero-based video frame. Set `frame_load_cap` to `0` for the complete clip.
+## Nodes
 
-The `alpha` output uses white for opaque foreground. ComfyUI's
-`Join Image with Alpha` uses inverse `MASK` semantics, so the example passes
-`alpha` through `Invert Mask` before joining it with `foreground_rgb`.
+### Load SAM2Matting Video Model
 
-## Temporal and memory behavior
+- `variant`: `sam2.1_tiny`, `sam2.1_base_plus`, or `sam3`
+- `compile_model`: optionally compiles the image backbone; the first run can be
+  slow
 
-- A nonzero `mask_frame` is propagated forward and backward so every source
-  frame receives an alpha matte.
-- Frames are adapted directly from ComfyUI tensors. `balanced` and `low_vram`
-  resize and normalize frames lazily, avoiding a second full preprocessed copy
-  of a long clip.
-- Each execution owns a fresh tracker state, and the state is reset and cleared
-  on completion, interruption, or failure.
-- A loaded predictor is locked during propagation so two workflows cannot
-  accidentally share mutable temporal state.
-- Chunking is intentionally absent: independent chunks would create temporal
-  discontinuities. Split a clip only when you are prepared to reseed it.
+### SAM2Matting Video
 
-## Current scope and limitations
+Inputs:
 
-- Single object, seeded by a mask. Point, box, multiple-object, and SAM3 text
-  prompts are not exposed yet.
-- All frames in one `IMAGE` tensor necessarily have the same resolution.
-- SAM3 follows the current upstream implementation and requires CUDA.
-- The vendored SAM2Matting SAM2 fork uses a private Python package namespace,
-  so other custom nodes can load the standard top-level `sam2` package in the
-  same ComfyUI process. SAM3 still uses its upstream top-level package name and
-  stops with an explicit error if an incompatible `sam3` is already loaded.
-- Checkpoint quality and performance claims are upstream claims until reproduced
-  in your own ComfyUI environment.
+- `images`: the video frames as one ordered `IMAGE` batch
+- `initial_mask`: a foreground `MASK`
+- `mask_frame`: the frame that matches the seed mask
+- `mask_threshold`: converts the seed into a binary tracking mask
+- `memory_mode`:
+  - `balanced`: recommended default
+  - `low_vram`: offloads frames and temporal state to CPU
+  - `maximum_speed`: keeps frames and state on the model device
 
-## Tests
+Outputs:
 
-The focused tests use a fake temporal predictor, so they do not download a
-checkpoint or require a GPU:
+- `alpha`: soft foreground opacity for every frame
+- `foreground_rgb`: original, unpremultiplied RGB frames
+- `preview`: checkerboard composite for inspection
+
+ComfyUI's **Join Image with Alpha** uses inverse `MASK` semantics. Pass `alpha`
+through **Invert Mask** before connecting it to that node, as shown in the
+example workflow.
+
+## Practical limits
+
+- One tracked object per run, seeded by a mask.
+- The whole frame batch is processed as one temporal clip.
+- A nonzero `mask_frame` propagates both forward and backward.
+- Long clips can use substantial RAM or VRAM; start with `balanced` or
+  `low_vram`.
+- SAM3 requires CUDA.
+- Point, box, text, and multi-object prompts are not exposed yet.
+- Independent chunking is not provided because it would break temporal
+  continuity; split and reseed clips manually when needed.
+
+## Development
+
+Run the checkpoint-free test suite with:
 
 ```bash
 pytest -q
 ```
 
-They cover mask polarity and frame selection, forward/reverse propagation using
-one state, ordered alpha assembly, SAM2/SAM3 return-shape normalization,
-cleanup, and preview tensor contracts.
-
 ## License
 
-The official SAM2Matting repository states **CC BY-NC-SA 4.0** and limits use to
-non-commercial research. Its license is included at
-`vendor/SAM2MATTING_LICENSE`; see `THIRD_PARTY_NOTICES.md`. Review the upstream
-SAM2 and SAM3 terms as well before redistributing or deploying this package.
+The upstream SAM2Matting project uses **CC BY-NC-SA 4.0** for non-commercial
+research. See `vendor/SAM2MATTING_LICENSE` and `THIRD_PARTY_NOTICES.md`, and
+review the upstream SAM2 and SAM3 terms before redistribution or deployment.
