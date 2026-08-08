@@ -78,7 +78,13 @@ onto ComfyUI. It uses
 and produces a transparent VP9 WebM plus a black-background/white-foreground
 matte video. It omits full-batch UI preview nodes to avoid unnecessary RAM use.
 
-The example is capped at 48 frames for a quick first test. Set
+For text-prompt selection, use
+[`example_workflows/sam3_text_prompt_video.json`](example_workflows/sam3_text_prompt_video.json).
+It loads SAM3, turns a prompt such as `person` into a seed on one selected
+frame, shows that single-frame preview, and passes both the mask and matching
+frame index into temporal matting. Its full-batch preview remains unconnected.
+
+Both examples are capped at 48 frames for a quick first test. Set
 `frame_load_cap` to `0` to process the complete video.
 
 ## Nodes
