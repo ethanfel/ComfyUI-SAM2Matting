@@ -20,7 +20,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "SAM2Matting — default video workflow\n\n1. Upload a video and a black/white seed-mask image. White = foreground.\n2. The seed mask must match the video frame selected by mask_frame (zero-based).\n3. The loader and both encoders are set to 24 fps. Change all three together if needed.\n4. frame_load_cap is 48 for a quick first test; use 0 to process the complete clip.\n\nOutputs: transparent VP9 WebM and checkerboard H.264 preview. Full-batch Preview Image nodes are intentionally omitted to avoid unnecessary RAM use. Mask to Image is included as an unconnected black-background/white-foreground conversion helper. Invert Mask converts white-foreground opacity to ComfyUI's inverse-mask convention before Join Image with Alpha."
+        "SAM2Matting — default video workflow\n\n1. Upload a video and a black/white seed-mask image. White = foreground.\n2. The seed mask must match the video frame selected by mask_frame (zero-based).\n3. The loader and both encoders are set to 24 fps. Change all three together if needed.\n4. frame_load_cap is 48 for a quick first test; use 0 to process the complete clip.\n\nOutputs: transparent VP9 WebM and a black-background/white-foreground H.264 matte video. Full-batch Preview Image nodes are intentionally omitted to avoid unnecessary RAM use. Invert Mask converts white-foreground opacity to ComfyUI's inverse-mask convention before Join Image with Alpha."
       ],
       "color": "#243447",
       "bgcolor": "#34506b"
@@ -320,9 +320,7 @@
         {
           "name": "preview",
           "type": "IMAGE",
-          "links": [
-            11
-          ],
+          "links": null,
           "shape": 3,
           "slot_index": 2
         }
@@ -444,7 +442,9 @@
         {
           "name": "IMAGE",
           "type": "IMAGE",
-          "links": null,
+          "links": [
+            11
+          ],
           "shape": 3,
           "slot_index": 0
         }
@@ -672,7 +672,7 @@
       "widgets_values": {
         "frame_rate": 24,
         "loop_count": 0,
-        "filename_prefix": "SAM2Matting/checkerboard_preview",
+        "filename_prefix": "SAM2Matting/matte",
         "format": "video/h264-mp4",
         "pix_fmt": "yuv420p",
         "crf": 18,
@@ -754,8 +754,8 @@
     ],
     [
       11,
-      4,
-      2,
+      8,
+      0,
       11,
       0,
       "IMAGE"

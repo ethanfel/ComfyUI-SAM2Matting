@@ -75,10 +75,8 @@ For a ready-made example, drag
 [`example_workflows/sam2matting_video_default.json`](example_workflows/sam2matting_video_default.json)
 onto ComfyUI. It uses
 [Video Helper Suite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)
-and produces a checkerboard preview video and a transparent VP9 WebM. It omits
-full-batch UI preview nodes to avoid unnecessary RAM use, while leaving an
-unconnected **Mask to Image** helper for black-background/white-foreground
-conversion.
+and produces a transparent VP9 WebM plus a black-background/white-foreground
+matte video. It omits full-batch UI preview nodes to avoid unnecessary RAM use.
 
 The example is capped at 48 frames for a quick first test. Set
 `frame_load_cap` to `0` to process the complete video.
