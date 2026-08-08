@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-from sam2.modeling.sam2_base import SAM2Base
+from comfyui_sam2matting_sam2.modeling.sam2_base import SAM2Base
 
 NO_OBJ_SCORE = -1024.0
 

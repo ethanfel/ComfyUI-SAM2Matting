@@ -1,22 +1,9 @@
 import logging
-import os
+from pathlib import Path
+
 import torch
-from hydra import compose
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
-
-import sam2
-
-if os.path.isdir(os.path.join(sam2.__path__[0], "sam2")):
-
-    raise RuntimeError(
-        "You're likely running Python from the parent directory of the sam2 repository "
-        "(i.e. the directory where https://github.com/facebookresearch/sam2 is cloned into). "
-        "This is not supported since the `sam2` Python package could be shadowed by the "
-        "repository name (the repository is also named `sam2` and contains the Python package "
-        "in `sam2/sam2`). Please run Python from another directory (e.g. from the repo dir "
-        "rather than its parent dir, or from your home directory) after installing SAM 2."
-    )
 
 HF_MODEL_ID_TO_FILENAMES = {
     "facebook/sam2-hiera-tiny": (
@@ -53,6 +40,22 @@ HF_MODEL_ID_TO_FILENAMES = {
     ),
 }
 
+
+def _load_config(config_file, overrides):
+    """Load a package-local config without modifying Hydra's global state."""
+    config_path = Path(config_file)
+    if not config_path.is_absolute():
+        config_path = Path(__file__).resolve().parent / config_path
+    if not config_path.is_file():
+        raise FileNotFoundError(f"SAM2 config not found: {config_path}")
+
+    cfg = OmegaConf.load(config_path)
+    dotlist = [override.lstrip("+") for override in overrides]
+    if dotlist:
+        cfg = OmegaConf.merge(cfg, OmegaConf.from_dotlist(dotlist))
+    OmegaConf.resolve(cfg)
+    return cfg
+
 def build_sam2(
     config_file,
     ckpt_path=None,
@@ -72,8 +75,7 @@ def build_sam2(
             "++model.sam_mask_decoder_extra_args.dynamic_multimask_stability_thresh=0.98",
         ]
 
-    cfg = compose(config_name=config_file, overrides=hydra_overrides_extra)
-    OmegaConf.resolve(cfg)
+    cfg = _load_config(config_file, hydra_overrides_extra)
     model = instantiate(cfg.model, _recursive_=True)
     _load_checkpoint(model, ckpt_path)
     model = model.to(device)
@@ -100,8 +102,7 @@ def build_sam2matting(
             "++model.sam_mask_decoder_extra_args.dynamic_multimask_stability_thresh=0.98",
         ]
 
-    cfg = compose(config_name=config_file, overrides=hydra_overrides_extra)
-    OmegaConf.resolve(cfg)
+    cfg = _load_config(config_file, hydra_overrides_extra)
     model = instantiate(cfg.model, _recursive_=True)
     _load_checkpoint(model, ckpt_path)
     model = model.to(device)
@@ -120,11 +121,11 @@ def build_sam2_video_predictor(
     **kwargs,
 ):
     hydra_overrides = [
-        "++model._target_=sam2.sam2_video_predictor.SAM2VideoPredictor",
+        "++model._target_=comfyui_sam2matting_sam2.sam2_video_predictor.SAM2VideoPredictor",
     ]
     if vos_optimized:
         hydra_overrides = [
-            "++model._target_=sam2.sam2_video_predictor.SAM2VideoPredictorVOS",
+            "++model._target_=comfyui_sam2matting_sam2.sam2_video_predictor.SAM2VideoPredictorVOS",
             "++model.compile_image_encoder=True",  
         ]
 
@@ -142,8 +143,7 @@ def build_sam2_video_predictor(
         ]
     hydra_overrides.extend(hydra_overrides_extra)
 
-    cfg = compose(config_name=config_file, overrides=hydra_overrides)
-    OmegaConf.resolve(cfg)
+    cfg = _load_config(config_file, hydra_overrides)
     model = instantiate(cfg.model, _recursive_=True)
     _load_checkpoint(model, ckpt_path)
     model = model.to(device)
@@ -183,11 +183,11 @@ def build_sam2matting_video_predictor(
     **kwargs,
 ):
     hydra_overrides = [
-        "++model._target_=sam2.sam2matting_video_predictor.SAM2VideoPredictor",
+        "++model._target_=comfyui_sam2matting_sam2.sam2matting_video_predictor.SAM2VideoPredictor",
     ]
     if vos_optimized:
         hydra_overrides = [
-            "++model._target_=sam2.sam2matting_video_predictor.SAM2VideoPredictorVOS",
+            "++model._target_=comfyui_sam2matting_sam2.sam2matting_video_predictor.SAM2VideoPredictorVOS",
             "++model.compile_image_encoder=True",  
         ]
 
@@ -205,8 +205,7 @@ def build_sam2matting_video_predictor(
         ]
     hydra_overrides.extend(hydra_overrides_extra)
 
-    cfg = compose(config_name=config_file, overrides=hydra_overrides)
-    OmegaConf.resolve(cfg)
+    cfg = _load_config(config_file, hydra_overrides)
     model = instantiate(cfg.model, _recursive_=True)
     _load_checkpoint(model, ckpt_path)
     model = model.to(device)

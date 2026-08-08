@@ -121,9 +121,10 @@ The `alpha` output uses white for opaque foreground. ComfyUI's
   prompts are not exposed yet.
 - All frames in one `IMAGE` tensor necessarily have the same resolution.
 - SAM3 follows the current upstream implementation and requires CUDA.
-- SAM2/SAM3 use top-level Python package names upstream. If another custom node
-  has already loaded a different incompatible `sam2` or `sam3` implementation,
-  this node stops with an explicit collision error instead of mixing code.
+- The vendored SAM2Matting SAM2 fork uses a private Python package namespace,
+  so other custom nodes can load the standard top-level `sam2` package in the
+  same ComfyUI process. SAM3 still uses its upstream top-level package name and
+  stops with an explicit error if an incompatible `sam3` is already loaded.
 - Checkpoint quality and performance claims are upstream claims until reproduced
   in your own ComfyUI environment.
 

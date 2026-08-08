@@ -25,6 +25,7 @@ import torch.nn.functional as F
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 VENDOR_DIR = PACKAGE_DIR / "vendor"
+SAM2_VENDOR_PACKAGE = "comfyui_sam2matting_sam2"
 
 VARIANT_INFO = {
     "sam2.1_base_plus": {
@@ -409,13 +410,18 @@ class SAM2MattingVideoModel:
         return self._build_sam3(checkpoint_path)
 
     def _build_sam2(self, checkpoint_path: str):
-        _activate_vendored_package("sam2")
-        from sam2.build_sam import build_sam2matting_video_predictor
+        # The upstream fork adds matting-specific model classes to SAM2. Keep
+        # it under a private top-level name so ComfyUI nodes that import the
+        # standard ``sam2`` package can safely coexist in the same process.
+        _activate_vendored_package(SAM2_VENDOR_PACKAGE)
+        from comfyui_sam2matting_sam2.build_sam import (
+            build_sam2matting_video_predictor,
+        )
 
         # Keep upstream's useful mask post-processing but disable its optional
         # 8-pixel CUDA connected-components pass. Custom-node installs do not
-        # build the private ``sam2._C`` extension, and the upstream function
-        # otherwise emits a warning before falling back on every run.
+        # build the private connected-components extension, and the upstream
+        # function otherwise emits a warning before falling back on every run.
         overrides = [
             "++model.sam_mask_decoder_extra_args.dynamic_multimask_via_stability=true",
             "++model.sam_mask_decoder_extra_args.dynamic_multimask_stability_delta=0.05",

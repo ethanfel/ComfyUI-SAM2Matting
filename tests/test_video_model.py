@@ -1,8 +1,17 @@
+import importlib
+import sys
+import types
+from pathlib import Path
+
 import pytest
 import torch
+from hydra import initialize_config_dir
 
 from video_model import (
+    SAM2_VENDOR_PACKAGE,
     SAM2MattingVideoModel,
+    VENDOR_DIR,
+    _activate_vendored_package,
     _extract_propagated_alpha,
     make_checkerboard_preview,
     prepare_seed_mask,
@@ -53,6 +62,35 @@ class FailingSAM2Predictor(FakeSAM2Predictor):
     def propagate_in_video(self, *args, **kwargs):
         raise RuntimeError("synthetic propagation failure")
         yield  # pragma: no cover - makes this a generator like the real API
+
+
+def test_vendored_sam2_has_private_namespace_and_coexists_with_installed_sam2(
+    monkeypatch,
+):
+    external_sam2 = types.ModuleType("sam2")
+    external_sam2.__file__ = "/external/site-packages/sam2/__init__.py"
+    monkeypatch.setitem(sys.modules, "sam2", external_sam2)
+
+    _activate_vendored_package(SAM2_VENDOR_PACKAGE)
+    private_sam2 = importlib.import_module(SAM2_VENDOR_PACKAGE)
+    importlib.import_module(f"{SAM2_VENDOR_PACKAGE}.sam2matting_video_predictor")
+
+    assert sys.modules["sam2"] is external_sam2
+    assert Path(private_sam2.__file__).resolve().is_relative_to(VENDOR_DIR)
+
+
+def test_private_sam2_config_ignores_an_existing_hydra_search_path(tmp_path):
+    _activate_vendored_package(SAM2_VENDOR_PACKAGE)
+    from comfyui_sam2matting_sam2.build_sam import _load_config
+
+    with initialize_config_dir(config_dir=str(tmp_path), version_base="1.2"):
+        cfg = _load_config(
+            "configs/sam2matting-sam2.1tiny.yaml",
+            ["++model.fill_hole_area=0"],
+        )
+
+    assert cfg.model.fill_hole_area == 0
+    assert cfg.model._target_.startswith(f"{SAM2_VENDOR_PACKAGE}.")
 
 
 def test_prepare_seed_mask_selects_matching_video_frame_and_white_is_foreground():

@@ -5,9 +5,9 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import torch
 from PIL.Image import Image
-from sam2.modeling.sam2matting_base import SAM2MattingBase
+from comfyui_sam2matting_sam2.modeling.sam2matting_base import SAM2MattingBase
 
-from sam2.utils.transforms import SAM2Transforms
+from comfyui_sam2matting_sam2.utils.transforms import SAM2Transforms
 import torch.nn.functional as F
 
 class SAM2MattingImagePredictor:
@@ -40,7 +40,7 @@ class SAM2MattingImagePredictor:
 
     @classmethod
     def from_pretrained(cls, model_id: str, **kwargs) -> "SAM2MattingImagePredictor":
-        from sam2.build_sam import build_sam2matting_hf
+        from comfyui_sam2matting_sam2.build_sam import build_sam2matting_hf
         sam2matting_model = build_sam2matting_hf(model_id, **kwargs)
         return cls(sam2matting_model, **kwargs)
 

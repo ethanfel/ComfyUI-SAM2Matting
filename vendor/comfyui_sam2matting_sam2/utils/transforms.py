@@ -57,7 +57,7 @@ class SAM2Transforms(nn.Module):
 
     def postprocess_masks(self, masks: torch.Tensor, orig_hw) -> torch.Tensor:
            
-        from sam2.utils.misc import get_connected_components
+        from comfyui_sam2matting_sam2.utils.misc import get_connected_components
 
         masks = masks.float()
         input_masks = masks

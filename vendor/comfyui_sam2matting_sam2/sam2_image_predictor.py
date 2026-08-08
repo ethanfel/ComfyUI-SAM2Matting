@@ -6,9 +6,9 @@ import numpy as np
 import torch
 from PIL.Image import Image
 
-from sam2.modeling.sam2_base import SAM2Base
+from comfyui_sam2matting_sam2.modeling.sam2_base import SAM2Base
 
-from sam2.utils.transforms import SAM2Transforms
+from comfyui_sam2matting_sam2.utils.transforms import SAM2Transforms
 
 class SAM2ImagePredictor:
     def __init__(
@@ -46,7 +46,7 @@ class SAM2ImagePredictor:
     @classmethod
     def from_pretrained(cls, model_id: str, **kwargs) -> "SAM2ImagePredictor":
            
-        from sam2.build_sam import build_sam2_hf
+        from comfyui_sam2matting_sam2.build_sam import build_sam2_hf
 
         sam_model = build_sam2_hf(model_id, **kwargs)
         return cls(sam_model, **kwargs)

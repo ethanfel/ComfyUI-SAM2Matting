@@ -37,7 +37,7 @@ def get_sdpa_settings():
 
 def get_connected_components(mask):
        
-    from sam2 import _C
+    from comfyui_sam2matting_sam2 import _C
 
     return _C.get_connected_componnets(mask.to(torch.uint8).contiguous())
 
