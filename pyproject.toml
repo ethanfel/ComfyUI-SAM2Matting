@@ -1,6 +1,6 @@
 [project]
 name = "sam2matting-video"
-version = "1.0.0"
+version = "1.0.1"
 description = "Video-first temporal foreground matting for ComfyUI using FudanCVL SAM2Matting with SAM2.1 and SAM3 variants."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,15 +12,24 @@ classifiers = [
     "Operating System :: OS Independent",
     "Environment :: GPU :: NVIDIA CUDA",
 ]
-dynamic = ["dependencies"]
+dependencies = [
+    "numpy",
+    "pillow",
+    "tqdm",
+    "hydra-core",
+    "iopath",
+    "timm",
+    "loguru",
+    "einops",
+    "ftfy",
+    "regex",
+    "psutil",
+]
 
 [project.urls]
 Repository = "https://github.com/ethanfel/ComfyUI-SAM2Matting"
 Documentation = "https://github.com/ethanfel/ComfyUI-SAM2Matting#readme"
 "Bug Tracker" = "https://github.com/ethanfel/ComfyUI-SAM2Matting/issues"
-
-[tool.setuptools.dynamic]
-dependencies = { file = ["requirements.txt"] }
 
 [tool.comfy]
 PublisherId = "ethanfel"
