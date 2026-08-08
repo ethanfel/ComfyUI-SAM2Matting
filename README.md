@@ -81,6 +81,26 @@ If `initial_mask` contains one mask, it seeds `mask_frame`. If its batch length
 matches the video, the mask at `mask_frame` is selected. Other mask batch sizes
 are rejected rather than silently repeated.
 
+### Default video workflow
+
+Drag
+[`example_workflows/sam2matting_video_default.json`](example_workflows/sam2matting_video_default.json)
+onto ComfyUI. It uses
+[Video Helper Suite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)
+to load and encode the clip, and includes:
+
+- a 48-frame test cap and matching 24 fps load/encode settings
+- a grayscale matte preview and checkerboard compositing preview
+- a transparent VP9 WebM output using `yuva420p`
+- an H.264 checkerboard preview with the source audio
+
+Select your video and a mask image, then set `mask_frame` to the matching
+zero-based video frame. Set `frame_load_cap` to `0` for the complete clip.
+
+The `alpha` output uses white for opaque foreground. ComfyUI's
+`Join Image with Alpha` uses inverse `MASK` semantics, so the example passes
+`alpha` through `Invert Mask` before joining it with `foreground_rgb`.
+
 ## Temporal and memory behavior
 
 - A nonzero `mask_frame` is propagated forward and backward so every source
