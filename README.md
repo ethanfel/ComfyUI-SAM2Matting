@@ -13,7 +13,7 @@ frames, and a checkerboard preview.
 | --- | --- | ---: | ---: | ---: | --- |
 | `sam2.1_tiny` | Fast previews, any subject | 16 GB+ | 3.08 / 3.61 GB | 40.46 / 40.31 FPS | Yes |
 | `sam2.1_base_plus` | Best default, any subject | 16 GB+ | 3.42 / 3.82 GB | 30.40 / 30.36 FPS | Yes, default |
-| `sam3` | Largest tracker, any subject | 24 GB+ | 4.80 / 4.91 GB | 9.09 / 9.07 FPS | Yes |
+| `sam3` | Text-guided masks, any subject | 24 GB+ | 4.80 / 4.91 GB | 9.09 / 9.07 FPS | Yes |
 | [MatAnyone2](https://github.com/pq-yang/MatAnyone2) | Dedicated human matting | 16 GB+ | 3.10 / 13.67 GB | 21.94 / 9.93 FPS | No |
 
 VRAM and speed are the upstream
@@ -63,6 +63,14 @@ installation with the versions pinned by the upstream research repository.
 4. Connect the video and mask to **SAM2Matting Video**.
 5. Set `mask_frame` to the zero-based frame matching the mask, then run.
 
+With SAM3, **SAM3 Text Prompt to Seed Mask** can replace the painted mask:
+
+1. Connect the loaded SAM3 model and video batch to the prompt node.
+2. Describe the subject and choose the matching `frame_index`.
+3. Connect `seed_mask` to `initial_mask` and `mask_frame` to `mask_frame` on
+   **SAM2Matting Video**.
+4. Inspect the prompt node's preview before running the complete clip.
+
 For a ready-made example, drag
 [`example_workflows/sam2matting_video_default.json`](example_workflows/sam2matting_video_default.json)
 onto ComfyUI. It uses
@@ -104,6 +112,23 @@ ComfyUI's **Join Image with Alpha** uses inverse `MASK` semantics. Pass `alpha`
 through **Invert Mask** before connecting it to that node, as shown in the
 example workflow.
 
+### SAM3 Text Prompt to Seed Mask
+
+This optional node requires the loader variant `sam3`.
+
+- `images`: the same video batch used for matting
+- `text_prompt`: a short subject description, such as `woman in red jacket`
+- `frame_index`: the frame on which SAM3 should find the subject
+- `confidence_threshold`: removes lower-confidence detections
+- `selection`:
+  - `highest_score`: use the best matching detection
+  - `combine_all`: merge every detection above the threshold
+
+It outputs the seed `MASK`, a checkerboard preview, the highest detection score,
+and the matching frame index. The detector is cached in system RAM and swapped
+onto the GPU only while generating a seed mask, avoiding a permanent second
+SAM3 vision backbone in VRAM. The first prompt is therefore slower.
+
 ## Practical limits
 
 - One tracked object per run, seeded by a mask.
@@ -112,7 +137,7 @@ example workflow.
 - Long clips can use substantial RAM or VRAM; start with `balanced` or
   `low_vram`.
 - SAM3 requires CUDA.
-- Point, box, text, and multi-object prompts are not exposed yet.
+- Point, box, and multi-object propagation are not exposed yet.
 - Independent chunking is not provided because it would break temporal
   continuity; split and reseed clips manually when needed.
 

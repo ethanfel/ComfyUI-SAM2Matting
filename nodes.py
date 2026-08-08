@@ -12,6 +12,7 @@ import folder_paths
 
 from .video_model import (
     MEMORY_MODES,
+    SAM3_TEXT_SELECTIONS,
     VARIANT_INFO,
     SAM2MattingVideoModel,
     download_checkpoint,
@@ -154,12 +155,79 @@ class SAM2MattingVideo:
         return (alpha, foreground_rgb, preview)
 
 
+class SAM3TextPromptSeedMask:
+    """Create one inspectable video seed mask from a SAM3 text prompt."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": (MODEL_TYPE,),
+                "images": ("IMAGE",),
+                "text_prompt": (
+                    "STRING",
+                    {"default": "person", "multiline": False},
+                ),
+                "frame_index": (
+                    "INT",
+                    {"default": 0, "min": 0, "max": 2**31 - 1, "step": 1},
+                ),
+                "confidence_threshold": (
+                    "FLOAT",
+                    {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01},
+                ),
+                "selection": (
+                    list(SAM3_TEXT_SELECTIONS),
+                    {"default": "highest_score"},
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("MASK", "IMAGE", "FLOAT", "INT")
+    RETURN_NAMES = ("seed_mask", "preview", "top_score", "mask_frame")
+    FUNCTION = "segment"
+    CATEGORY = "SAM2Matting/video"
+    DESCRIPTION = (
+        "Uses the SAM3 detector to find a text-described subject on one frame. "
+        "Returns a white-foreground seed mask for SAM2Matting Video, a "
+        "checkerboard preview, the highest detection score, and the matching "
+        "frame index. The loaded model variant must be sam3."
+    )
+
+    def segment(
+        self,
+        model: SAM2MattingVideoModel,
+        images: torch.Tensor,
+        text_prompt: str,
+        frame_index: int,
+        confidence_threshold: float,
+        selection: str,
+    ):
+        progress = comfy.utils.ProgressBar(1)
+        seed_mask, top_score = model.text_seed_mask(
+            images=images,
+            text_prompt=text_prompt,
+            frame_index=frame_index,
+            confidence_threshold=confidence_threshold,
+            selection=selection,
+            interrupt_callback=(
+                comfy.model_management.throw_exception_if_processing_interrupted
+            ),
+        )
+        frame = images[int(frame_index) : int(frame_index) + 1]
+        preview = make_checkerboard_preview(frame, seed_mask)
+        progress.update_absolute(1, 1)
+        return (seed_mask, preview, float(top_score), int(frame_index))
+
+
 NODE_CLASS_MAPPINGS = {
     "LoadSAM2MattingVideoModel": LoadSAM2MattingVideoModel,
+    "SAM3TextPromptSeedMask": SAM3TextPromptSeedMask,
     "SAM2MattingVideo": SAM2MattingVideo,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "LoadSAM2MattingVideoModel": "Load SAM2Matting Video Model",
+    "SAM3TextPromptSeedMask": "SAM3 Text Prompt to Seed Mask",
     "SAM2MattingVideo": "SAM2Matting Video",
 }

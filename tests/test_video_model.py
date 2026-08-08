@@ -15,6 +15,7 @@ from video_model import (
     _extract_propagated_alpha,
     make_checkerboard_preview,
     prepare_seed_mask,
+    select_sam3_text_mask,
 )
 
 
@@ -64,6 +65,12 @@ class FailingSAM2Predictor(FakeSAM2Predictor):
         yield  # pragma: no cover - makes this a generator like the real API
 
 
+class FakeMovableModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.anchor = torch.nn.Parameter(torch.zeros(1))
+
+
 def test_vendored_sam2_has_private_namespace_and_coexists_with_installed_sam2(
     monkeypatch,
 ):
@@ -107,6 +114,101 @@ def test_prepare_seed_mask_selects_matching_video_frame_and_white_is_foreground(
     )
 
     assert result.tolist() == [[0.0, 1.0], [0.0, 0.0]]
+
+
+def test_sam3_text_mask_selects_highest_scoring_detection():
+    masks = torch.zeros(2, 1, 3, 4, dtype=torch.bool)
+    masks[0, 0, 0, 0] = True
+    masks[1, 0, 1:, 2:] = True
+
+    selected, score = select_sam3_text_mask(
+        masks,
+        torch.tensor([0.61, 0.92]),
+        "highest_score",
+    )
+
+    assert selected.shape == (3, 4)
+    assert selected.sum().item() == 4
+    assert score == pytest.approx(0.92)
+
+
+def test_sam3_text_mask_can_combine_all_detections():
+    masks = torch.zeros(2, 1, 2, 3, dtype=torch.bool)
+    masks[0, 0, 0, 0] = True
+    masks[1, 0, 1, 2] = True
+
+    selected, score = select_sam3_text_mask(
+        masks,
+        torch.tensor([0.8, 0.7]),
+        "combine_all",
+    )
+
+    assert selected.tolist() == [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    assert score == pytest.approx(0.8)
+
+
+def test_sam3_text_mask_reports_when_prompt_finds_nothing():
+    with pytest.raises(RuntimeError, match="did not find an object"):
+        select_sam3_text_mask(
+            torch.zeros(0, 1, 2, 2),
+            torch.zeros(0),
+            "highest_score",
+        )
+
+
+def test_sam3_text_seed_uses_selected_frame_and_returns_mask(monkeypatch):
+    processor_module = types.ModuleType("sam3.model.sam3_image_processor")
+
+    class FakeProcessor:
+        def __init__(self, model, device, confidence_threshold):
+            assert isinstance(model, FakeMovableModel)
+            assert device == "cpu"
+            assert confidence_threshold == pytest.approx(0.6)
+
+        def set_image(self, image):
+            assert image.shape == (3, 2, 4)
+            assert image[0, 0, 0].item() == pytest.approx(0.75)
+            return {"image": image}
+
+        def set_text_prompt(self, prompt, state):
+            assert prompt == "red car"
+            state["masks"] = torch.tensor(
+                [[[[False, True, True, False]] * 2]], dtype=torch.bool
+            )
+            state["scores"] = torch.tensor([0.88])
+            return state
+
+    processor_module.Sam3Processor = FakeProcessor
+    sam3_package = types.ModuleType("sam3")
+    sam3_package.__path__ = []
+    sam3_model_package = types.ModuleType("sam3.model")
+    sam3_model_package.__path__ = []
+    monkeypatch.setitem(sys.modules, "sam3", sam3_package)
+    monkeypatch.setitem(sys.modules, "sam3.model", sam3_model_package)
+    monkeypatch.setitem(
+        sys.modules,
+        "sam3.model.sam3_image_processor",
+        processor_module,
+    )
+
+    model = SAM2MattingVideoModel.from_predictor(
+        "sam3", FakeMovableModel(), device="cpu"
+    )
+    model.checkpoint_path = "unused-in-test"
+    model._sam3_text_model = FakeMovableModel()
+    images = torch.zeros(2, 2, 4, 3)
+    images[1, ..., 0] = 0.75
+
+    mask, score = model.text_seed_mask(
+        images,
+        " red car ",
+        frame_index=1,
+        confidence_threshold=0.6,
+    )
+
+    assert mask.shape == (1, 2, 4)
+    assert mask[0, 0].tolist() == [0.0, 1.0, 1.0, 0.0]
+    assert score == pytest.approx(0.88)
 
 
 def test_temporal_model_uses_one_state_and_propagates_both_directions():

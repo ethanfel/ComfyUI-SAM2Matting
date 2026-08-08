@@ -53,6 +53,8 @@ MEMORY_MODES = {
     "maximum_speed": (False, False),
 }
 
+SAM3_TEXT_SELECTIONS = ("highest_score", "combine_all")
+
 ProgressCallback = Callable[[int, int], None]
 InterruptCallback = Callable[[], None]
 
@@ -124,6 +126,32 @@ def _activate_vendored_package(package_name: str) -> None:
 def _device_from_predictor(predictor, fallback: torch.device) -> torch.device:
     value = getattr(predictor, "device", fallback)
     return value if isinstance(value, torch.device) else torch.device(value)
+
+
+def _move_cached_tensors(value, device: torch.device):
+    if torch.is_tensor(value):
+        return value.to(device)
+    if isinstance(value, dict):
+        return {key: _move_cached_tensors(item, device) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_move_cached_tensors(item, device) for item in value)
+    if isinstance(value, list):
+        return [_move_cached_tensors(item, device) for item in value]
+    return value
+
+
+def _move_module_and_tensor_caches(module, device: str | torch.device) -> None:
+    """Move a module plus SAM3's unregistered positional/coordinate caches."""
+    destination = torch.device(device)
+    module.to(destination)
+    for child in module.modules():
+        for attribute in ("cache", "coord_cache", "compilable_cord_cache"):
+            if hasattr(child, attribute):
+                setattr(
+                    child,
+                    attribute,
+                    _move_cached_tensors(getattr(child, attribute), destination),
+                )
 
 
 def _resize_and_normalize_frame(
@@ -248,6 +276,47 @@ def prepare_seed_mask(
             f"applying mask_threshold={threshold}. White must mean foreground."
         )
     return selected
+
+
+def select_sam3_text_mask(
+    masks,
+    scores,
+    selection: str,
+) -> tuple[torch.Tensor, float]:
+    """Reduce SAM3 text detections to one white-foreground seed mask."""
+    if selection not in SAM3_TEXT_SELECTIONS:
+        raise ValueError(
+            f"Unknown SAM3 text selection {selection!r}; choose one of "
+            f"{SAM3_TEXT_SELECTIONS}"
+        )
+
+    masks_tensor = torch.as_tensor(masks).detach()
+    if masks_tensor.ndim == 4 and masks_tensor.shape[1] == 1:
+        masks_tensor = masks_tensor[:, 0]
+    elif masks_tensor.ndim == 2:
+        masks_tensor = masks_tensor.unsqueeze(0)
+    if masks_tensor.ndim != 3:
+        raise RuntimeError(
+            "SAM3 returned masks with an unsupported shape: "
+            f"{tuple(masks_tensor.shape)}"
+        )
+
+    scores_tensor = torch.as_tensor(scores).detach().float().flatten()
+    if masks_tensor.shape[0] == 0 or scores_tensor.numel() == 0:
+        raise RuntimeError("SAM3 did not find an object above the confidence threshold")
+    if masks_tensor.shape[0] != scores_tensor.numel():
+        raise RuntimeError(
+            "SAM3 returned a different number of masks and scores: "
+            f"{masks_tensor.shape[0]} masks, {scores_tensor.numel()} scores"
+        )
+
+    top_index = int(torch.argmax(scores_tensor).item())
+    top_score = float(scores_tensor[top_index].item())
+    if selection == "highest_score":
+        selected = masks_tensor[top_index]
+    else:
+        selected = masks_tensor.any(dim=0)
+    return selected.float().cpu().clamp(0.0, 1.0), top_score
 
 
 def _init_sam2_state(
@@ -387,7 +456,9 @@ class SAM2MattingVideoModel:
         self.kind = VARIANT_INFO[variant]["kind"]
         self.device = torch.device(device)
         self.compile_model = bool(compile_model)
+        self.checkpoint_path = str(checkpoint_path)
         self._run_lock = threading.Lock()
+        self._sam3_text_model = None
         self.predictor = self._build_predictor(str(checkpoint_path))
 
     @classmethod
@@ -398,7 +469,9 @@ class SAM2MattingVideoModel:
         instance.kind = VARIANT_INFO[variant]["kind"]
         instance.device = torch.device(device)
         instance.compile_model = False
+        instance.checkpoint_path = None
         instance._run_lock = threading.Lock()
+        instance._sam3_text_model = None
         instance.predictor = predictor
         return instance
 
@@ -472,6 +545,123 @@ class SAM2MattingVideoModel:
                 dynamic=False,
             )
         return predictor
+
+    def _get_sam3_text_model(self):
+        if self.kind != "sam3":
+            raise ValueError(
+                "SAM3 text prompting requires the loader variant to be set to sam3"
+            )
+        if self.checkpoint_path is None:
+            raise RuntimeError("The SAM3 text model has no checkpoint path")
+        if self._sam3_text_model is None:
+            _activate_vendored_package("sam3")
+            from sam3.model_builder import build_sam3_image_model
+
+            bpe_path = VENDOR_DIR / "sam3" / "bpe_simple_vocab_16e6.txt.gz"
+            if not bpe_path.is_file():
+                raise FileNotFoundError(f"SAM3 tokenizer vocabulary not found: {bpe_path}")
+            self._sam3_text_model = build_sam3_image_model(
+                bpe_path=str(bpe_path),
+                device="cpu",
+                eval_mode=True,
+                checkpoint_path=self.checkpoint_path,
+                load_from_HF=False,
+                enable_segmentation=True,
+                enable_inst_interactivity=False,
+                compile=False,
+            )
+        return self._sam3_text_model
+
+    def text_seed_mask(
+        self,
+        images: torch.Tensor,
+        text_prompt: str,
+        frame_index: int = 0,
+        confidence_threshold: float = 0.5,
+        selection: str = "highest_score",
+        interrupt_callback: InterruptCallback | None = None,
+    ) -> tuple[torch.Tensor, float]:
+        """Ground a text prompt on one frame and return one binary seed mask."""
+        if self.kind != "sam3":
+            raise ValueError(
+                "SAM3 text prompting requires the loader variant to be set to sam3"
+            )
+        prompt = str(text_prompt).strip()
+        if not prompt:
+            raise ValueError("text_prompt must not be empty")
+        if not 0.0 <= float(confidence_threshold) <= 1.0:
+            raise ValueError("confidence_threshold must be between 0 and 1")
+        if selection not in SAM3_TEXT_SELECTIONS:
+            raise ValueError(
+                f"Unknown SAM3 text selection {selection!r}; choose one of "
+                f"{SAM3_TEXT_SELECTIONS}"
+            )
+
+        images = torch.as_tensor(images)
+        if images.ndim != 4:
+            raise ValueError(
+                "images must be one ordered ComfyUI IMAGE batch with shape "
+                f"[frames,height,width,channels], got {tuple(images.shape)}"
+            )
+        frame_count, _height, _width, channels = map(int, images.shape)
+        if frame_count < 1:
+            raise ValueError("images must contain at least one frame")
+        if channels < 3:
+            raise ValueError(f"images must have at least three color channels, got {channels}")
+        if not 0 <= int(frame_index) < frame_count:
+            raise ValueError(
+                f"frame_index must be between 0 and {frame_count - 1}, got {frame_index}"
+            )
+
+        frame_chw = (
+            images[int(frame_index), ..., :3]
+            .detach()
+            .float()
+            .cpu()
+            .clamp(0.0, 1.0)
+            .permute(2, 0, 1)
+            .contiguous()
+        )
+        if interrupt_callback is not None:
+            interrupt_callback()
+
+        with self._run_lock:
+            # The detector and temporal tracker each contain a large vision
+            # backbone. Keep only the active one on CUDA so prompt refinement
+            # does not permanently double the node's VRAM footprint.
+            text_model = None
+            processor = None
+            state = None
+            _move_module_and_tensor_caches(self.predictor, "cpu")
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
+            try:
+                text_model = self._get_sam3_text_model()
+                _move_module_and_tensor_caches(text_model, self.device)
+                from sam3.model.sam3_image_processor import Sam3Processor
+
+                with torch.inference_mode(), _autocast_context(self.device):
+                    processor = Sam3Processor(
+                        text_model,
+                        device=str(self.device),
+                        confidence_threshold=float(confidence_threshold),
+                    )
+                    state = processor.set_image(frame_chw)
+                    if interrupt_callback is not None:
+                        interrupt_callback()
+                    state = processor.set_text_prompt(prompt=prompt, state=state)
+                    mask, score = select_sam3_text_mask(
+                        state["masks"], state["scores"], selection
+                    )
+                return mask.unsqueeze(0), score
+            finally:
+                state = None
+                processor = None
+                if text_model is not None:
+                    _move_module_and_tensor_caches(text_model, "cpu")
+                if self.device.type == "cuda":
+                    torch.cuda.empty_cache()
+                _move_module_and_tensor_caches(self.predictor, self.device)
 
     def matte_video(
         self,
