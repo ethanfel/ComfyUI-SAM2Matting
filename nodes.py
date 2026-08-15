@@ -113,15 +113,15 @@ class SAM2MattingVideo:
             }
         }
 
-    RETURN_TYPES = ("MASK", "IMAGE", "IMAGE")
-    RETURN_NAMES = ("alpha", "foreground_rgb", "preview")
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("alpha",)
     FUNCTION = "matte"
     CATEGORY = "SAM2Matting/video"
     DESCRIPTION = (
         "Treats the complete ordered IMAGE batch as one video, seeds the selected "
         "frame with a white-foreground mask, and propagates a single temporal "
-        "predictor state in both directions. Returns an ordered alpha batch, the "
-        "unpremultiplied source RGB, and a checkerboard preview."
+        "predictor state in both directions. Returns only the ordered alpha batch "
+        "to avoid caching duplicate full-resolution RGB and preview batches."
     )
 
     def matte(
@@ -150,9 +150,7 @@ class SAM2MattingVideo:
                 comfy.model_management.throw_exception_if_processing_interrupted
             ),
         )
-        foreground_rgb = images.detach().float().cpu()[..., :3].clamp(0.0, 1.0)
-        preview = make_checkerboard_preview(foreground_rgb, alpha)
-        return (alpha, foreground_rgb, preview)
+        return (alpha,)
 
 
 class SAM3TextPromptSeedMask:

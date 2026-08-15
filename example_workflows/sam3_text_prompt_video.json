@@ -20,7 +20,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "SAM3Matting — text-prompt video workflow\n\n1. Upload a video and describe the foreground subject in SAM3 Text Prompt to Seed Mask.\n2. frame_index selects the frame used for detection; its mask_frame output is already connected to temporal propagation.\n3. Inspect the prompt node's single-frame preview, then queue the workflow.\n4. The loader and both encoders are set to 24 fps. Change all three together if needed.\n5. frame_load_cap is 48 for a quick test; use 0 for the complete clip.\n\nOutputs: transparent VP9 WebM and black-background/white-foreground H.264 matte video. The temporal full-batch preview is intentionally unconnected to avoid unnecessary UI RAM use."
+        "SAM3Matting — text-prompt video workflow\n\n1. Upload a video and describe the foreground subject in SAM3 Text Prompt to Seed Mask.\n2. frame_index selects the frame used for detection; its mask_frame output is already connected to temporal propagation.\n3. Inspect the prompt node's single-frame preview, then queue the workflow.\n4. The loader and both encoders are set to 24 fps. Change all three together if needed.\n5. frame_load_cap is 48 for a quick test; use 0 for the complete clip.\n\nOutputs: transparent VP9 WebM and black-background/white-foreground H.264 matte video. The temporal matting node returns only alpha; the original video feeds Join Image with Alpha directly to avoid caching duplicate RGB and preview batches."
       ],
       "color": "#243447",
       "bgcolor": "#34506b"
@@ -159,7 +159,8 @@
           "type": "IMAGE",
           "links": [
             3,
-            4
+            4,
+            10
           ],
           "shape": 3,
           "slot_index": 0
@@ -396,22 +397,6 @@
           ],
           "shape": 3,
           "slot_index": 0
-        },
-        {
-          "name": "foreground_rgb",
-          "type": "IMAGE",
-          "links": [
-            10
-          ],
-          "shape": 3,
-          "slot_index": 1
-        },
-        {
-          "name": "preview",
-          "type": "IMAGE",
-          "links": null,
-          "shape": 3,
-          "slot_index": 2
         }
       ],
       "properties": {
@@ -851,8 +836,8 @@
     ],
     [
       10,
-      4,
-      1,
+      2,
+      0,
       6,
       0,
       "IMAGE"

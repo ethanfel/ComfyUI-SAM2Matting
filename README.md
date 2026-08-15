@@ -4,8 +4,7 @@ Video matting for ComfyUI using
 [FudanCVL SAM2Matting](https://github.com/FudanCVL/SAM2Matting).
 
 Give the node a video and one rough foreground mask. It tracks the selected
-subject through the clip and returns a soft alpha matte, the original RGB
-frames, and a checkerboard preview.
+subject through the clip and returns a soft alpha matte.
 
 ## Which model should I use?
 
@@ -76,13 +75,15 @@ For a ready-made example, drag
 onto ComfyUI. It uses
 [Video Helper Suite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)
 and produces a transparent VP9 WebM plus a black-background/white-foreground
-matte video. It omits full-batch UI preview nodes to avoid unnecessary RAM use.
+matte video. The original video batch is reused for the RGB output, so the
+matting node only adds its alpha batch to ComfyUI's cache.
 
 For text-prompt selection, use
 [`example_workflows/sam3_text_prompt_video.json`](example_workflows/sam3_text_prompt_video.json).
 It loads SAM3, turns a prompt such as `person` into a seed on one selected
 frame, shows that single-frame preview, and passes both the mask and matching
-frame index into temporal matting. Its full-batch preview remains unconnected.
+frame index into temporal matting. The temporal node returns only its alpha
+batch.
 
 Both examples are capped at 48 frames for a quick first test. Set
 `frame_load_cap` to `0` to process the complete video.
@@ -111,12 +112,18 @@ Inputs:
 Outputs:
 
 - `alpha`: soft foreground opacity for every frame
-- `foreground_rgb`: original, unpremultiplied RGB frames
-- `preview`: checkerboard composite for inspection
 
-ComfyUI's **Join Image with Alpha** uses inverse `MASK` semantics. Pass `alpha`
-through **Invert Mask** before connecting it to that node, as shown in the
-example workflow.
+To create transparent output, connect the original video batch directly to
+**Join Image with Alpha**. ComfyUI's **Join Image with Alpha** uses inverse
+`MASK` semantics, so pass `alpha` through **Invert Mask** before connecting it
+to the alpha input, as shown in the example workflow.
+
+The node deliberately does not return copied RGB frames or a full checkerboard
+preview. ComfyUI caches every returned tensor, including unconnected outputs;
+removing those two outputs cuts this node's cached result from seven float
+channels per pixel to one. The input video and downstream output nodes can
+still be retained by ComfyUI's own cache. Use ComfyUI's `--cache-none` option
+when no cross-run cache retention is desired.
 
 ### SAM3 Text Prompt to Seed Mask
 
@@ -140,8 +147,9 @@ SAM3 vision backbone in VRAM. The first prompt is therefore slower.
 - One tracked object per run, seeded by a mask.
 - The whole frame batch is processed as one temporal clip.
 - A nonzero `mask_frame` propagates both forward and backward.
-- Long clips can use substantial RAM or VRAM; start with `balanced` or
-  `low_vram`.
+- Long clips can use substantial RAM or VRAM. `low_vram` reduces VRAM by
+  offloading more state to system RAM; use `balanced` first unless VRAM is the
+  limiting resource.
 - SAM3 requires CUDA.
 - Point, box, and multi-object propagation are not exposed yet.
 - Independent chunking is not provided because it would break temporal

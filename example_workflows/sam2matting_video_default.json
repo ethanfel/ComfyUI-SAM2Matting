@@ -20,7 +20,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "SAM2Matting — default video workflow\n\n1. Upload a video and a black/white seed-mask image. White = foreground.\n2. The seed mask must match the video frame selected by mask_frame (zero-based).\n3. The loader and both encoders are set to 24 fps. Change all three together if needed.\n4. frame_load_cap is 48 for a quick first test; use 0 to process the complete clip.\n\nOutputs: transparent VP9 WebM and a black-background/white-foreground H.264 matte video. Full-batch Preview Image nodes are intentionally omitted to avoid unnecessary RAM use. Invert Mask converts white-foreground opacity to ComfyUI's inverse-mask convention before Join Image with Alpha."
+        "SAM2Matting — default video workflow\n\n1. Upload a video and a black/white seed-mask image. White = foreground.\n2. The seed mask must match the video frame selected by mask_frame (zero-based).\n3. The loader and both encoders are set to 24 fps. Change all three together if needed.\n4. frame_load_cap is 48 for a quick first test; use 0 to process the complete clip.\n\nOutputs: transparent VP9 WebM and a black-background/white-foreground H.264 matte video. The matting node returns only alpha; the original video feeds Join Image with Alpha directly to avoid caching duplicate RGB and preview batches. Invert Mask converts white-foreground opacity to ComfyUI's inverse-mask convention."
       ],
       "color": "#243447",
       "bgcolor": "#34506b"
@@ -157,7 +157,8 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            2
+            2,
+            6
           ],
           "shape": 3,
           "slot_index": 0
@@ -307,22 +308,6 @@
           ],
           "shape": 3,
           "slot_index": 0
-        },
-        {
-          "name": "foreground_rgb",
-          "type": "IMAGE",
-          "links": [
-            6
-          ],
-          "shape": 3,
-          "slot_index": 1
-        },
-        {
-          "name": "preview",
-          "type": "IMAGE",
-          "links": null,
-          "shape": 3,
-          "slot_index": 2
         }
       ],
       "properties": {
@@ -730,8 +715,8 @@
     ],
     [
       6,
-      4,
-      1,
+      2,
+      0,
       6,
       0,
       "IMAGE"
