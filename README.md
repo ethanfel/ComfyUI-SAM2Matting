@@ -174,14 +174,15 @@ The output is a file-backed native `VIDEO`, ready for ComfyUI's **Save Video**.
 During execution, model-resolution tracking frames are kept as compressed JPEG
 records and soft mattes as lossless 8-bit PNG records in ComfyUI's temporary
 directory. Only the current full-resolution source frame is composited in RAM.
+Temporal outputs are limited to the model's active attention window (plus the
+seed-near window needed for reverse propagation), so tracking-state VRAM or RAM
+reaches a plateau instead of increasing for the complete clip.
 The temporary files are removed after encoding; the file backing the returned
 `VIDEO` remains until ComfyUI cleans its normal temporary directory.
 
 This trades temporary disk I/O and two sequential video decodes for predictable
 host memory. Temporary disk use still grows with clip length and image content.
-The temporal tracker state also grows with clip length on the selected
-`state_device`; the node does not independently batch or reset the tracker,
-because doing so would break temporal continuity.
+It does not split or reset the tracker, so temporal continuity is preserved.
 
 ### SAM3 Text Prompt to Seed Mask
 
@@ -206,8 +207,10 @@ SAM3 vision backbone in VRAM. The first prompt is therefore slower.
 - The tensor node processes the whole frame batch as one temporal clip.
 - A nonzero `mask_frame` propagates both forward and backward.
 - For long solid-background renders, use the streaming node with
-  `state_device=gpu`. The tensor node and `state_device=cpu` can still consume
-  substantial system RAM as the clip grows.
+  `state_device=gpu`. Its tracking state is bounded; GPU allocator reservations
+  may remain visible after tensors are released, but should plateau rather than
+  grow linearly with frame count. The tensor node can still consume substantial
+  system RAM because ComfyUI supplies the complete decoded frame batch.
 - SAM3 requires CUDA.
 - Point, box, and multi-object propagation are not exposed yet.
 - Independent chunking is not provided because it would break temporal

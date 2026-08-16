@@ -14,6 +14,8 @@ from video_model import (
     VENDOR_DIR,
     _activate_vendored_package,
     _extract_propagated_alpha,
+    _prune_temporal_state,
+    _temporal_state_horizon,
     make_checkerboard_preview,
     prepare_seed_mask,
     select_sam3_text_mask,
@@ -377,6 +379,86 @@ def test_file_backed_api_emits_each_alpha_without_building_a_batch():
     assert sorted(emitted) == [0, 1, 2]
     assert all(tuple(alpha.shape) == (4, 6) for alpha in emitted.values())
     assert predictor.reset_called
+
+
+def test_temporal_state_horizon_covers_mask_memory_and_object_pointers():
+    predictor = types.SimpleNamespace(
+        num_maskmem=7,
+        memory_temporal_stride_for_eval=1,
+        max_obj_ptrs_in_encoder=16,
+    )
+    assert _temporal_state_horizon(predictor) == 15
+
+    predictor.memory_temporal_stride_for_eval = 5
+    assert _temporal_state_horizon(predictor) == 26
+
+
+def test_bounded_sam2_state_keeps_seed_context_and_recent_forward_history():
+    predictor = types.SimpleNamespace(
+        num_maskmem=7,
+        memory_temporal_stride_for_eval=1,
+        max_obj_ptrs_in_encoder=16,
+    )
+    outputs = {index: object() for index in range(10, 101)}
+    tracked = {index: {"reverse": False} for index in outputs}
+    state = {
+        "output_dict_per_obj": {
+            0: {
+                "cond_frame_outputs": {},
+                "non_cond_frame_outputs": outputs,
+            }
+        },
+        "frames_tracked_per_obj": {0: tracked},
+    }
+
+    _prune_temporal_state(
+        predictor,
+        state,
+        current_frame=100,
+        mask_frame=10,
+        reverse=False,
+    )
+
+    expected = set(range(10, 26)) | set(range(85, 101))
+    assert set(outputs) == expected
+    assert set(tracked) == expected
+
+
+def test_bounded_sam3_state_drops_shared_maps_behind_reverse_window():
+    predictor = types.SimpleNamespace(
+        num_maskmem=7,
+        memory_temporal_stride_for_eval=1,
+        max_obj_ptrs_in_encoder=16,
+    )
+    global_outputs = {index: object() for index in range(101)}
+    per_object_outputs = {index: object() for index in range(101)}
+    tracked = {index: {"reverse": index <= 50} for index in range(101)}
+    state = {
+        "output_dict": {
+            "cond_frame_outputs": {},
+            "non_cond_frame_outputs": global_outputs,
+        },
+        "output_dict_per_obj": {
+            0: {
+                "cond_frame_outputs": {},
+                "non_cond_frame_outputs": per_object_outputs,
+            }
+        },
+        "frames_already_tracked": tracked,
+    }
+
+    _prune_temporal_state(
+        predictor,
+        state,
+        current_frame=20,
+        mask_frame=50,
+        reverse=True,
+    )
+
+    expected = set(range(36))
+    assert set(global_outputs) == expected
+    assert set(per_object_outputs) == expected
+    assert set(tracked) == expected
 
 
 def test_temporal_state_is_reset_when_propagation_fails():

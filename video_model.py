@@ -426,22 +426,89 @@ def _propagation_passes(
     predictor,
     state,
     mask_frame: int,
-) -> Iterator[tuple]:
-    yield from predictor.propagate_in_video(
+) -> Iterator[tuple[bool, tuple]]:
+    for result in predictor.propagate_in_video(
         state,
         start_frame_idx=mask_frame,
         max_frame_num_to_track=state["num_frames"],
         reverse=False,
         tqdm_disable=True,
-    )
+    ):
+        yield False, result
     if mask_frame > 0:
-        yield from predictor.propagate_in_video(
+        for result in predictor.propagate_in_video(
             state,
             start_frame_idx=mask_frame,
             max_frame_num_to_track=state["num_frames"],
             reverse=True,
             tqdm_disable=True,
-        )
+        ):
+            yield True, result
+
+
+def _temporal_state_horizon(predictor) -> int:
+    """Return the furthest non-conditioning frame the predictor can attend to."""
+    num_maskmem = max(int(getattr(predictor, "num_maskmem", 0)), 0)
+    stride = max(int(getattr(predictor, "memory_temporal_stride_for_eval", 1)), 1)
+    memory_horizon = 0 if num_maskmem < 2 else (num_maskmem - 2) * stride + 1
+    pointer_horizon = max(
+        int(getattr(predictor, "max_obj_ptrs_in_encoder", 1)) - 1,
+        0,
+    )
+    return max(memory_horizon, pointer_horizon, 1)
+
+
+def _prune_temporal_state(
+    predictor,
+    state: dict,
+    *,
+    current_frame: int,
+    mask_frame: int,
+    reverse: bool,
+) -> None:
+    """Discard non-conditioning outputs outside the model's attention window.
+
+    During the forward pass, the first window after a non-zero seed is retained
+    as well as the moving recent window. The reverse pass can consequently see
+    the same seed-near forward context as the unbounded upstream implementation.
+    """
+    horizon = _temporal_state_horizon(predictor)
+
+    def should_remove(frame_index: int) -> bool:
+        if reverse:
+            return frame_index > current_frame + horizon
+        if frame_index >= current_frame - horizon:
+            return False
+        preserve_for_reverse = mask_frame > 0 and frame_index <= mask_frame + horizon
+        return not preserve_for_reverse
+
+    removed: set[int] = set()
+    output_dict = state.get("output_dict")
+    if isinstance(output_dict, dict):
+        non_cond = output_dict.get("non_cond_frame_outputs", {})
+        for frame_index in tuple(non_cond):
+            if should_remove(int(frame_index)):
+                non_cond.pop(frame_index, None)
+                removed.add(int(frame_index))
+
+    for obj_output_dict in state.get("output_dict_per_obj", {}).values():
+        non_cond = obj_output_dict.get("non_cond_frame_outputs", {})
+        for frame_index in tuple(non_cond):
+            if should_remove(int(frame_index)):
+                non_cond.pop(frame_index, None)
+                removed.add(int(frame_index))
+
+    if not removed:
+        return
+
+    frames_already_tracked = state.get("frames_already_tracked")
+    if isinstance(frames_already_tracked, dict):
+        for frame_index in removed:
+            frames_already_tracked.pop(frame_index, None)
+
+    for tracked_frames in state.get("frames_tracked_per_obj", {}).values():
+        for frame_index in removed:
+            tracked_frames.pop(frame_index, None)
 
 
 def _autocast_context(device: torch.device):
@@ -777,12 +844,15 @@ class SAM2MattingVideoModel:
         alpha_callback: AlphaCallback | None = None,
         progress_callback: ProgressCallback | None = None,
         interrupt_callback: InterruptCallback | None = None,
+        bounded_state: bool = True,
     ) -> None:
         """Propagate over a normalized, file-backed frame sequence.
 
         Unlike :meth:`matte_video`, this API never collects a full alpha batch.
         Each completed full-resolution matte is delivered to ``alpha_callback``
-        and can be written to disk immediately.
+        and can be written to disk immediately. By default, temporal outputs
+        older than the predictor's attention horizon are discarded as the
+        sequence advances, bounding both GPU and host tracking-state memory.
         """
         frame_count = len(frames)
         if frame_count < 1:
@@ -823,6 +893,7 @@ class SAM2MattingVideoModel:
             alpha_callback=alpha_callback,
             progress_callback=progress_callback,
             interrupt_callback=interrupt_callback,
+            bounded_state=bool(bounded_state),
         )
 
     def _propagate_frame_sequence(
@@ -839,6 +910,7 @@ class SAM2MattingVideoModel:
         alpha_callback: AlphaCallback,
         progress_callback: ProgressCallback | None,
         interrupt_callback: InterruptCallback | None,
+        bounded_state: bool = False,
     ) -> None:
         """Run one predictor state and emit alphas without retaining them."""
         with self._run_lock, torch.inference_mode(), _autocast_context(self.device):
@@ -871,7 +943,9 @@ class SAM2MattingVideoModel:
                     obj_id=1,
                     mask=seed_mask.to(self.device),
                 )
-                for result in _propagation_passes(self.predictor, state, mask_frame):
+                for reverse, result in _propagation_passes(
+                    self.predictor, state, mask_frame
+                ):
                     if interrupt_callback is not None:
                         interrupt_callback()
                     frame_index, raw_alpha = _extract_propagated_alpha(result)
@@ -879,10 +953,16 @@ class SAM2MattingVideoModel:
                         raise RuntimeError(
                             f"Predictor returned out-of-range frame index {frame_index}"
                         )
-                    alpha_callback(
-                        frame_index,
-                        _alpha_to_2d(raw_alpha, height, width),
-                    )
+                    alpha = _alpha_to_2d(raw_alpha, height, width)
+                    if bounded_state:
+                        _prune_temporal_state(
+                            self.predictor,
+                            state,
+                            current_frame=frame_index,
+                            mask_frame=mask_frame,
+                            reverse=reverse,
+                        )
+                    alpha_callback(frame_index, alpha)
                     completed.add(frame_index)
                     if progress_callback is not None:
                         progress_callback(len(completed), frame_count)
