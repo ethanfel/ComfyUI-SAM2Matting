@@ -164,11 +164,17 @@ solid background color.
 - `background_color`: six-digit RGB hex, default `#808080`
 - `state_device`:
   - `gpu`: recommended; keeps the tracker's temporal state out of system RAM
-  - `cpu`: lowers VRAM use but temporal state grows in system RAM
+  - `cpu`: lowers VRAM use by keeping the bounded tracker state in system RAM
 - `output_fps`: `0` keeps the source FPS; a positive value converts FPS while
   preserving duration by dropping or duplicating frames
 - `crf`: H.264 quality; lower is higher quality and larger
 - `preserve_audio`: transcodes the active source audio to AAC
+- `verbose_log`: reports all three stages, actual predictor/state devices,
+  frame progress, speed, elapsed time, cache sizes, and CUDA memory use
+
+The log labels preprocessing as CPU-only, tracking as CUDA compute, and final
+compositing/encoding as CPU-only. This makes normal GPU-idle periods explicit
+and warns if the predictor parameters are unexpectedly not on CUDA.
 
 The output is a file-backed native `VIDEO`, ready for ComfyUI's **Save Video**.
 During execution, model-resolution tracking frames are kept as compressed JPEG

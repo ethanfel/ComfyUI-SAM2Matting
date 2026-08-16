@@ -99,7 +99,8 @@
         {"name": "state_device", "type": "COMBO", "widget": {"name": "state_device"}, "link": null},
         {"name": "output_fps", "type": "FLOAT", "widget": {"name": "output_fps"}, "link": null},
         {"name": "crf", "type": "INT", "widget": {"name": "crf"}, "link": null},
-        {"name": "preserve_audio", "type": "BOOLEAN", "widget": {"name": "preserve_audio"}, "link": null}
+        {"name": "preserve_audio", "type": "BOOLEAN", "widget": {"name": "preserve_audio"}, "link": null},
+        {"name": "verbose_log", "type": "BOOLEAN", "widget": {"name": "verbose_log"}, "link": null}
       ],
       "outputs": [
         {"name": "video", "type": "VIDEO", "slot_index": 0, "links": [4]}
@@ -108,7 +109,7 @@
         "aux_id": "ethanfel/ComfyUI-SAM2Matting",
         "Node name for S&R": "SAM2MattingVideoBackground"
       },
-      "widgets_values": [0, 0.5, "#808080", "gpu", 0.0, 18, true]
+      "widgets_values": [0, 0.5, "#808080", "gpu", 0.0, 18, true, true]
     },
     {
       "id": 5,
