@@ -8,6 +8,7 @@ import torch
 from streaming_video import (
     TRACKING_CACHE_MODES,
     DiskAlphaStore,
+    _temporally_stabilized_alpha,
     encode_background_video,
     parse_hex_color,
     prepare_tracking_frames,
@@ -179,6 +180,28 @@ def test_alpha_store_async_writes_are_bounded_and_random_access(tmp_path):
 
     for index in range(6):
         assert store.as_float(index).mean() == pytest.approx(index / 5, abs=1 / 255)
+    store.close()
+
+
+def test_temporal_alpha_stabilization_suppresses_one_frame_excursions(tmp_path):
+    store = DiskAlphaStore(
+        tmp_path / "alpha-stabilize.frames",
+        frame_count=5,
+        height=4,
+        width=4,
+    )
+    for index, opacity in enumerate((1.0, 1.0, 0.0, 1.0, 1.0)):
+        store.write(index, torch.full((4, 4), opacity))
+    store.flush()
+
+    raw = _temporally_stabilized_alpha(store, 2, 5, strength=0.0)
+    gentle = _temporally_stabilized_alpha(store, 2, 5, strength=0.35)
+    full = _temporally_stabilized_alpha(store, 2, 5, strength=1.0)
+
+    assert raw.mean() == pytest.approx(0.0)
+    assert gentle.mean() == pytest.approx(0.35)
+    assert full.mean() == pytest.approx(1.0)
+    assert _temporally_stabilized_alpha(store, 0, 5, strength=1.0).mean() == 1.0
     store.close()
 
 

@@ -315,6 +315,10 @@ class DiskAlphaStore:
         self._futures.append(future)
 
     def as_float(self, frame_index: int) -> np.ndarray:
+        return self.as_uint8(frame_index).astype(np.float32) / 255.0
+
+    def as_uint8(self, frame_index: int) -> np.ndarray:
+        """Read one matte without expanding it to full-resolution float32."""
         record = self._records[frame_index]
         if record is None:
             raise RuntimeError(f"Alpha frame {frame_index} was not written")
@@ -325,7 +329,7 @@ class DiskAlphaStore:
         if len(payload) != length:
             raise IOError(f"Alpha frame {frame_index} is incomplete")
         with Image.open(io.BytesIO(payload)) as image:
-            return np.asarray(image, dtype=np.float32) / 255.0
+            return np.asarray(image, dtype=np.uint8).copy()
 
     def flush(self) -> None:
         futures, self._futures = self._futures, []
@@ -442,6 +446,37 @@ def _composite_rgb(
     return np.clip(np.rint(foreground), 0, 255).astype(np.uint8)
 
 
+def _temporally_stabilized_alpha(
+    alpha_store: DiskAlphaStore,
+    frame_index: int,
+    frame_count: int,
+    strength: float,
+) -> np.ndarray:
+    """Blend one matte toward its three-frame temporal median.
+
+    For monotonic boundary motion, the current frame is already the median and
+    remains unchanged. A one-frame inward or outward excursion is the outlier,
+    so it is pulled toward the two neighboring mattes. Only three uint8 mattes
+    are read, keeping this independent of clip length.
+    """
+    strength = float(np.clip(strength, 0.0, 1.0))
+    current = alpha_store.as_uint8(frame_index)
+    if strength <= 0.0 or frame_index == 0 or frame_index == frame_count - 1:
+        return current.astype(np.float32) / 255.0
+
+    previous = alpha_store.as_uint8(frame_index - 1)
+    following = alpha_store.as_uint8(frame_index + 1)
+    lower = np.minimum(previous, following)
+    upper = np.maximum(previous, following)
+    median = np.clip(current, lower, upper)
+
+    stabilized = current.astype(np.float32)
+    stabilized *= np.float32(1.0 - strength)
+    stabilized += median.astype(np.float32) * np.float32(strength)
+    stabilized *= np.float32(1.0 / 255.0)
+    return stabilized
+
+
 def _encode_video_only(
     video,
     alpha_store: DiskAlphaStore,
@@ -453,6 +488,7 @@ def _encode_video_only(
     encoder: str,
     worker_threads: int,
     pipeline_depth: int,
+    edge_stabilization: float,
     progress_callback: ProgressCallback | None,
     interrupt_callback: InterruptCallback | None,
 ) -> VideoInfo:
@@ -495,7 +531,12 @@ def _encode_video_only(
         def composite_frame(frame_index: int, rgb: np.ndarray) -> np.ndarray:
             return _composite_rgb(
                 rgb,
-                alpha_store.as_float(frame_index),
+                _temporally_stabilized_alpha(
+                    alpha_store,
+                    frame_index,
+                    info.frame_count,
+                    edge_stabilization,
+                ),
                 background,
             )
 
@@ -720,6 +761,7 @@ def encode_background_video(
     encoder: str = "auto",
     worker_threads: int = 4,
     pipeline_depth: int = 8,
+    edge_stabilization: float = 0.0,
     progress_callback: ProgressCallback | None = None,
     interrupt_callback: InterruptCallback | None = None,
 ) -> str:
@@ -753,6 +795,7 @@ def encode_background_video(
                 candidate,
                 worker_threads,
                 pipeline_depth,
+                edge_stabilization,
                 progress_callback,
                 interrupt_callback,
             )

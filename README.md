@@ -188,6 +188,9 @@ This separate node keeps performance and encoding controls off the main node:
 - `preserve_audio`: transcodes active source audio to AAC
 - `verbose_log`: reports stage progress, devices, throughput, cache sizes, and
   CUDA memory
+- `edge_stabilization`: blends one-frame alpha excursions toward a three-frame
+  temporal median. `0` disables it; `0.35` is the gentle default. Higher values
+  reduce more flicker but can flatten very fast, thin, or translucent details.
 
 The output is a file-backed native `VIDEO`, ready for ComfyUI's **Save Video**.
 The streaming pipeline has three bounded stages:
@@ -196,8 +199,9 @@ The streaming pipeline has three bounded stages:
    preparation work; lossless Zstandard is the default.
 2. Track sequentially on the model device. Frame reads are prefetched and alpha
    PNG writes run asynchronously, but temporal inference itself remains ordered.
-3. Decode the source again, composite several frames in a bounded worker queue,
-   and encode with NVENC or libx264.
+3. Stabilize each alpha from only its two neighboring disk-backed mattes, decode
+   the source again, composite in a bounded worker queue, and encode with NVENC
+   or libx264.
 
 Soft mattes remain lossless 8-bit PNG records in ComfyUI's temporary directory.
 Temporal outputs are limited to the model's active attention window (plus the

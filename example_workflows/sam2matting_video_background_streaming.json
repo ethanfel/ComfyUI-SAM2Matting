@@ -16,7 +16,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "SAM2Matting — streaming grey-background workflow\n\n1. Enter a video path visible inside the ComfyUI machine/container, then load a black/white seed mask. White = foreground.\n2. The seed mask must match mask_frame (zero-based).\n3. background_color defaults to middle grey (#808080).\n4. gpu keeps the bounded temporal state on the GPU; cpu trades VRAM for system RAM.\n5. Streaming Options contains cache, worker, encoder, FPS, quality, audio, and logging controls. It is optional; the main node has safe defaults without it.\n\nThe path loader bypasses the browser upload limit. Lossless Zstandard tracking frames are the default. Processing uses bounded queues and returns a native VIDEO without creating a full IMAGE or MASK batch."
+        "SAM2Matting — streaming grey-background workflow\n\n1. Enter a video path visible inside the ComfyUI machine/container, then load a black/white seed mask. White = foreground.\n2. The seed mask must match mask_frame (zero-based).\n3. background_color defaults to middle grey (#808080).\n4. gpu keeps the bounded temporal state on the GPU; cpu trades VRAM for system RAM.\n5. Streaming Options contains cache, worker, encoder, FPS, quality, audio, edge-stabilization, and logging controls. It is optional; the main node has safe defaults without it.\n\nThe path loader bypasses the browser upload limit. Lossless Zstandard tracking frames are the default. Processing uses bounded queues and returns a native VIDEO without creating a full IMAGE or MASK batch."
       ],
       "color": "#243447",
       "bgcolor": "#34506b"
@@ -97,7 +97,8 @@
         {"name": "output_fps", "type": "FLOAT", "widget": {"name": "output_fps"}, "link": null},
         {"name": "crf", "type": "INT", "widget": {"name": "crf"}, "link": null},
         {"name": "preserve_audio", "type": "BOOLEAN", "widget": {"name": "preserve_audio"}, "link": null},
-        {"name": "verbose_log", "type": "BOOLEAN", "widget": {"name": "verbose_log"}, "link": null}
+        {"name": "verbose_log", "type": "BOOLEAN", "widget": {"name": "verbose_log"}, "link": null},
+        {"name": "edge_stabilization", "type": "FLOAT", "widget": {"name": "edge_stabilization"}, "link": null}
       ],
       "outputs": [
         {"name": "streaming_options", "type": "SAM2MATTING_STREAMING_OPTIONS", "slot_index": 0, "links": [5]}
@@ -106,7 +107,7 @@
         "aux_id": "ethanfel/ComfyUI-SAM2Matting",
         "Node name for S&R": "SAM2MattingStreamingOptions"
       },
-      "widgets_values": ["lossless_zstd", 4, 8, "auto", 0.0, 18, true, true]
+      "widgets_values": ["lossless_zstd", 4, 8, "auto", 0.0, 18, true, true, 0.35]
     },
     {
       "id": 4,

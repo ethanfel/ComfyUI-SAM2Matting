@@ -79,6 +79,7 @@ def test_streaming_workflow_never_converts_native_video_to_an_image_batch():
         8,
         "auto",
     ]
+    assert options["widgets_values"][-1] == 0.35
 
 
 def test_matting_node_api_exposes_only_alpha():

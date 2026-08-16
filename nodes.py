@@ -47,6 +47,7 @@ DEFAULT_STREAMING_OPTIONS = {
     "crf": 18,
     "preserve_audio": True,
     "verbose_log": True,
+    "edge_stabilization": 0.35,
 }
 
 
@@ -101,7 +102,7 @@ class LoadSAM2MattingVideoPath:
                     "STRING",
                     {"default": "/path/to/video.mp4", "multiline": False},
                 ),
-            }
+            },
         }
 
     RETURN_TYPES = ("VIDEO",)
@@ -356,7 +357,25 @@ class SAM2MattingStreamingOptions:
                         ),
                     },
                 ),
-            }
+            },
+            "optional": {
+                "edge_stabilization": (
+                    "FLOAT",
+                    {
+                        "default": 0.35,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.05,
+                        "tooltip": (
+                            "Suppress one-frame matte-edge flicker by blending each "
+                            "alpha toward the three-frame temporal median. 0 keeps "
+                            "the raw matte; 0.35 is a gentle default; high values "
+                            "can flatten very fast, thin, or translucent details. "
+                            "Uses only neighboring disk-backed mattes."
+                        ),
+                    },
+                ),
+            },
         }
 
     RETURN_TYPES = (STREAMING_OPTIONS_TYPE,)
@@ -383,6 +402,7 @@ class SAM2MattingStreamingOptions:
         crf: int,
         preserve_audio: bool,
         verbose_log: bool,
+        edge_stabilization: float = 0.35,
     ):
         return (
             {
@@ -394,6 +414,7 @@ class SAM2MattingStreamingOptions:
                 "crf": int(crf),
                 "preserve_audio": bool(preserve_audio),
                 "verbose_log": bool(verbose_log),
+                "edge_stabilization": float(edge_stabilization),
             },
         )
 
@@ -545,6 +566,10 @@ class SAM2MattingVideoBackground:
         crf = int(options["crf"])
         preserve_audio = bool(options["preserve_audio"])
         verbose_log = bool(options["verbose_log"])
+        edge_stabilization = min(
+            1.0,
+            max(0.0, float(options["edge_stabilization"])),
+        )
         background = parse_hex_color(background_color)
         temp_root = folder_paths.get_temp_directory()
         os.makedirs(temp_root, exist_ok=True)
@@ -566,7 +591,7 @@ class SAM2MattingVideoBackground:
             "[stream] Run started: variant=%s, configured_device=%s, "
             "predictor_device=%s, state_device=%s, bounded_state=true, "
             "temporal_horizon=%d frames, cache=%s, workers=%d, pipeline=%d, "
-            "encoder=%s, output_fps=%s, preserve_audio=%s",
+            "encoder=%s, output_fps=%s, preserve_audio=%s, edge_stabilization=%.2f",
             model.variant,
             configured_device,
             actual_device,
@@ -578,6 +603,7 @@ class SAM2MattingVideoBackground:
             video_encoder,
             "source" if float(output_fps) <= 0.0 else float(output_fps),
             bool(preserve_audio),
+            edge_stabilization,
         )
         if configured_device.type == "cuda" and actual_device.type != "cuda":
             LOGGER.warning(
@@ -768,6 +794,7 @@ class SAM2MattingVideoBackground:
                     encoder=video_encoder,
                     worker_threads=worker_threads,
                     pipeline_depth=pipeline_depth,
+                    edge_stabilization=edge_stabilization,
                     progress_callback=encoding_progress,
                     interrupt_callback=(
                         comfy.model_management.throw_exception_if_processing_interrupted
