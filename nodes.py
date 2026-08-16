@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 
 import torch
 
@@ -17,6 +19,12 @@ from .video_model import (
     SAM2MattingVideoModel,
     download_checkpoint,
     make_checkerboard_preview,
+)
+from .streaming_video import (
+    DiskAlphaStore,
+    encode_background_video,
+    parse_hex_color,
+    prepare_tracking_frames,
 )
 
 
@@ -153,6 +161,164 @@ class SAM2MattingVideo:
         return (alpha,)
 
 
+class SAM2MattingVideoBackground:
+    """Composite a native VIDEO over a solid color without IMAGE batches."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": (MODEL_TYPE,),
+                "video": ("VIDEO",),
+                "initial_mask": ("MASK",),
+                "mask_frame": (
+                    "INT",
+                    {"default": 0, "min": 0, "max": 2**31 - 1, "step": 1},
+                ),
+                "mask_threshold": (
+                    "FLOAT",
+                    {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01},
+                ),
+                "background_color": (
+                    "STRING",
+                    {"default": "#808080", "multiline": False},
+                ),
+                "state_device": (
+                    ["gpu", "cpu"],
+                    {"default": "gpu"},
+                ),
+                "crf": (
+                    "INT",
+                    {"default": 18, "min": 0, "max": 51, "step": 1},
+                ),
+                "preserve_audio": ("BOOLEAN", {"default": True}),
+            }
+        }
+
+    RETURN_TYPES = ("VIDEO",)
+    RETURN_NAMES = ("video",)
+    FUNCTION = "composite"
+    CATEGORY = "SAM2Matting/video"
+    DESCRIPTION = (
+        "Streams a native ComfyUI VIDEO through temporal matting, composites the "
+        "foreground over a solid color, and returns a native H.264 VIDEO. Tracking "
+        "frames and mattes are disk-backed, so host RAM does not grow with the "
+        "full-resolution clip length. Connect the result to ComfyUI Save Video."
+    )
+
+    def composite(
+        self,
+        model: SAM2MattingVideoModel,
+        video,
+        initial_mask: torch.Tensor,
+        mask_frame: int,
+        mask_threshold: float,
+        background_color: str,
+        state_device: str,
+        crf: int,
+        preserve_audio: bool,
+    ):
+        from comfy_api.latest import InputImpl
+
+        if state_device not in ("gpu", "cpu"):
+            raise ValueError("state_device must be 'gpu' or 'cpu'")
+        background = parse_hex_color(background_color)
+        temp_root = folder_paths.get_temp_directory()
+        os.makedirs(temp_root, exist_ok=True)
+        with NamedTemporaryFile(
+            prefix="sam2matting_background_",
+            suffix=".mp4",
+            dir=temp_root,
+            delete=False,
+        ) as output_file:
+            output_path = Path(output_file.name)
+
+        progress = comfy.utils.ProgressBar(1)
+        frames = None
+        alphas = None
+        try:
+            with TemporaryDirectory(
+                prefix="sam2matting_stream_",
+                dir=temp_root,
+            ) as work_directory:
+                work_path = Path(work_directory)
+
+                def preprocessing_progress(done: int, total: int) -> None:
+                    progress.update_absolute(done, max(total * 3, 1))
+
+                frames, info = prepare_tracking_frames(
+                    video=video,
+                    path=work_path / "tracking.frames",
+                    image_size=int(model.predictor.image_size),
+                    kind=model.kind,
+                    progress_callback=preprocessing_progress,
+                    interrupt_callback=(
+                        comfy.model_management.throw_exception_if_processing_interrupted
+                    ),
+                )
+                total_progress = info.frame_count * 3
+                alphas = DiskAlphaStore(
+                    work_path / "alpha.frames",
+                    info.frame_count,
+                    info.height,
+                    info.width,
+                )
+
+                def tracking_progress(done: int, _total: int) -> None:
+                    progress.update_absolute(info.frame_count + done, total_progress)
+
+                model.matte_frame_sequence(
+                    frames=frames,
+                    height=info.height,
+                    width=info.width,
+                    initial_mask=initial_mask,
+                    mask_frame=int(mask_frame),
+                    mask_threshold=float(mask_threshold),
+                    memory_mode=("balanced" if state_device == "gpu" else "low_vram"),
+                    alpha_callback=alphas.write,
+                    progress_callback=tracking_progress,
+                    interrupt_callback=(
+                        comfy.model_management.throw_exception_if_processing_interrupted
+                    ),
+                )
+                alphas.flush()
+
+                def encoding_progress(done: int, _total: int) -> None:
+                    progress.update_absolute(
+                        info.frame_count * 2 + done,
+                        total_progress,
+                    )
+
+                encode_background_video(
+                    video=video,
+                    alpha_store=alphas,
+                    info=info,
+                    background=background,
+                    output_path=output_path,
+                    video_only_path=work_path / "composited_video.mp4",
+                    crf=int(crf),
+                    preserve_audio=bool(preserve_audio),
+                    progress_callback=encoding_progress,
+                    interrupt_callback=(
+                        comfy.model_management.throw_exception_if_processing_interrupted
+                    ),
+                )
+                alphas.close()
+                alphas = None
+                frames.close()
+                frames = None
+        except BaseException:
+            output_path.unlink(missing_ok=True)
+            raise
+        finally:
+            if alphas is not None:
+                alphas.close()
+            if frames is not None:
+                frames.close()
+
+        return (InputImpl.VideoFromFile(str(output_path)),)
+
+
 class SAM3TextPromptSeedMask:
     """Create one inspectable video seed mask from a SAM3 text prompt."""
 
@@ -222,10 +388,12 @@ NODE_CLASS_MAPPINGS = {
     "LoadSAM2MattingVideoModel": LoadSAM2MattingVideoModel,
     "SAM3TextPromptSeedMask": SAM3TextPromptSeedMask,
     "SAM2MattingVideo": SAM2MattingVideo,
+    "SAM2MattingVideoBackground": SAM2MattingVideoBackground,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "LoadSAM2MattingVideoModel": "Load SAM2Matting Video Model",
     "SAM3TextPromptSeedMask": "SAM3 Text Prompt to Seed Mask",
     "SAM2MattingVideo": "SAM2Matting Video",
+    "SAM2MattingVideoBackground": "SAM2Matting Video Background (Streaming)",
 }

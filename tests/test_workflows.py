@@ -9,7 +9,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATHS = (
     REPO_ROOT / "example_workflows" / "sam2matting_video_default.json",
     REPO_ROOT / "example_workflows" / "sam3_text_prompt_video.json",
+    REPO_ROOT / "example_workflows" / "sam2matting_video_background_streaming.json",
 )
+
+TENSOR_WORKFLOW_PATHS = WORKFLOW_PATHS[:2]
 
 
 def _load_workflow(path: Path) -> dict:
@@ -37,7 +40,7 @@ def test_example_workflow_links_are_consistent(path):
         assert target_input["type"] == link_type
 
 
-@pytest.mark.parametrize("path", WORKFLOW_PATHS, ids=lambda path: path.stem)
+@pytest.mark.parametrize("path", TENSOR_WORKFLOW_PATHS, ids=lambda path: path.stem)
 def test_example_workflow_reuses_video_and_matting_returns_only_alpha(path):
     workflow = _load_workflow(path)
     matting = _node(workflow, 4)
@@ -49,6 +52,16 @@ def test_example_workflow_reuses_video_and_matting_returns_only_alpha(path):
     image_link_id = join_alpha["inputs"][0]["link"]
     image_link = next(link for link in workflow["links"] if link[0] == image_link_id)
     assert image_link[1:3] == [2, 0]
+
+
+def test_streaming_workflow_never_converts_native_video_to_an_image_batch():
+    workflow = _load_workflow(WORKFLOW_PATHS[2])
+    node_types = {node["type"] for node in workflow["nodes"]}
+    streaming = _node(workflow, 4)
+
+    assert {"LoadVideo", "SAM2MattingVideoBackground", "SaveVideo"} <= node_types
+    assert "GetVideoComponents" not in node_types
+    assert [output["type"] for output in streaming["outputs"]] == ["VIDEO"]
 
 
 def test_matting_node_api_exposes_only_alpha():

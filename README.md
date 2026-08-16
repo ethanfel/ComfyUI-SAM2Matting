@@ -20,10 +20,10 @@ VRAM and speed are the upstream
 one NVIDIA A6000, not measurements from this ComfyUI node. Real performance
 depends on the GPU, clip, PyTorch build, and memory mode.
 
-System RAM values are conservative starting points rather than benchmark
-results. Clip length is the main factor: one decoded float32 RGB frame uses
-about 10.5 MiB at 720p or 23.7 MiB at 1080p, before mattes, previews, and other
-ComfyUI nodes. Use 32 GB or more for longer clips.
+System RAM values are conservative starting points for the tensor workflow.
+Clip length is the main factor there: one decoded float32 RGB frame uses about
+10.5 MiB at 720p or 23.7 MiB at 1080p, before mattes and other ComfyUI nodes.
+The streaming background node described below avoids that full-frame batch.
 
 SAM2Matting is designed for varied subjects such as people, animals, anime,
 and translucent objects. MatAnyone2 is specifically presented as a human video
@@ -56,11 +56,23 @@ installation with the versions pinned by the upstream research repository.
 
 ## Quick start
 
-1. Load a video as one ordered ComfyUI `IMAGE` batch.
-2. Paint or generate a black-and-white mask for one frame. White is foreground.
+For removing a background and replacing it with a solid grey:
+
+1. Load the clip with ComfyUI's native **Load Video** node.
+2. Paint or generate one black-and-white seed mask. White is foreground.
 3. Load `sam2.1_base_plus` with **Load SAM2Matting Video Model**.
-4. Connect the video and mask to **SAM2Matting Video**.
-5. Set `mask_frame` to the zero-based frame matching the mask, then run.
+4. Connect everything to **SAM2Matting Video Background (Streaming)**.
+5. Leave `background_color` at `#808080`, set the matching zero-based
+   `mask_frame`, and connect its native `VIDEO` output to **Save Video**.
+
+Drag
+[`example_workflows/sam2matting_video_background_streaming.json`](example_workflows/sam2matting_video_background_streaming.json)
+onto ComfyUI for this setup. It never converts the complete clip to an `IMAGE`
+or `MASK` batch, and it preserves source audio by default.
+
+The original tensor node remains useful when the alpha matte must feed other
+ComfyUI image nodes. Load the video as one ordered `IMAGE` batch, then connect
+it and the seed mask to **SAM2Matting Video**.
 
 With SAM3, **SAM3 Text Prompt to Seed Mask** can replace the painted mask:
 
@@ -70,7 +82,7 @@ With SAM3, **SAM3 Text Prompt to Seed Mask** can replace the painted mask:
    **SAM2Matting Video**.
 4. Inspect the prompt node's preview before running the complete clip.
 
-For a ready-made example, drag
+For the tensor/transparent-output example, drag
 [`example_workflows/sam2matting_video_default.json`](example_workflows/sam2matting_video_default.json)
 onto ComfyUI. It uses
 [Video Helper Suite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)
@@ -125,6 +137,35 @@ channels per pixel to one. The input video and downstream output nodes can
 still be retained by ComfyUI's own cache. Use ComfyUI's `--cache-none` option
 when no cross-run cache retention is desired.
 
+### SAM2Matting Video Background (Streaming)
+
+This is the recommended node when the final result is a normal video over one
+solid background color.
+
+- `video`: native ComfyUI `VIDEO`; do not place **Get Video Components** before
+  it
+- `initial_mask`: one white-foreground seed mask
+- `mask_frame`: the source frame matching the seed
+- `background_color`: six-digit RGB hex, default `#808080`
+- `state_device`:
+  - `gpu`: recommended; keeps the tracker's temporal state out of system RAM
+  - `cpu`: lowers VRAM use but temporal state grows in system RAM
+- `crf`: H.264 quality; lower is higher quality and larger
+- `preserve_audio`: transcodes the active source audio to AAC
+
+The output is a file-backed native `VIDEO`, ready for ComfyUI's **Save Video**.
+During execution, model-resolution tracking frames are kept as compressed JPEG
+records and soft mattes as lossless 8-bit PNG records in ComfyUI's temporary
+directory. Only the current full-resolution source frame is composited in RAM.
+The temporary files are removed after encoding; the file backing the returned
+`VIDEO` remains until ComfyUI cleans its normal temporary directory.
+
+This trades temporary disk I/O and two sequential video decodes for predictable
+host memory. Temporary disk use still grows with clip length and image content.
+The temporal tracker state also grows with clip length on the selected
+`state_device`; the node does not independently batch or reset the tracker,
+because doing so would break temporal continuity.
+
 ### SAM3 Text Prompt to Seed Mask
 
 This optional node requires the loader variant `sam3`.
@@ -145,11 +186,11 @@ SAM3 vision backbone in VRAM. The first prompt is therefore slower.
 ## Practical limits
 
 - One tracked object per run, seeded by a mask.
-- The whole frame batch is processed as one temporal clip.
+- The tensor node processes the whole frame batch as one temporal clip.
 - A nonzero `mask_frame` propagates both forward and backward.
-- Long clips can use substantial RAM or VRAM. `low_vram` reduces VRAM by
-  offloading more state to system RAM; use `balanced` first unless VRAM is the
-  limiting resource.
+- For long solid-background renders, use the streaming node with
+  `state_device=gpu`. The tensor node and `state_device=cpu` can still consume
+  substantial system RAM as the clip grows.
 - SAM3 requires CUDA.
 - Point, box, and multi-object propagation are not exposed yet.
 - Independent chunking is not provided because it would break temporal

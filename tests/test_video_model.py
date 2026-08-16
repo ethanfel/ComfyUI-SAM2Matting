@@ -357,6 +357,28 @@ def test_frame_zero_needs_only_forward_propagation():
     assert [call[2] for call in predictor.propagation_calls] == [False]
 
 
+def test_file_backed_api_emits_each_alpha_without_building_a_batch():
+    predictor = FakeSAM2Predictor()
+    model = SAM2MattingVideoModel.from_predictor(
+        "sam2.1_tiny", predictor, device="cpu"
+    )
+    frames = [torch.zeros(3, 8, 8) for _ in range(3)]
+    emitted = {}
+
+    model.matte_frame_sequence(
+        frames,
+        height=4,
+        width=6,
+        initial_mask=torch.ones(4, 6),
+        mask_frame=1,
+        alpha_callback=lambda index, alpha: emitted.__setitem__(index, alpha),
+    )
+
+    assert sorted(emitted) == [0, 1, 2]
+    assert all(tuple(alpha.shape) == (4, 6) for alpha in emitted.values())
+    assert predictor.reset_called
+
+
 def test_temporal_state_is_reset_when_propagation_fails():
     predictor = FailingSAM2Predictor()
     model = SAM2MattingVideoModel.from_predictor(

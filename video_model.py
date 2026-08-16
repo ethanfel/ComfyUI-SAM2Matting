@@ -17,7 +17,7 @@ import urllib.request
 from collections import OrderedDict
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Callable, Iterator
+from typing import Callable, Iterator, Sequence
 
 import numpy as np
 import torch
@@ -59,6 +59,7 @@ SAM3_TEXT_SELECTIONS = ("highest_score", "combine_all")
 
 ProgressCallback = Callable[[int, int], None]
 InterruptCallback = Callable[[], None]
+AlphaCallback = Callable[[int, torch.Tensor], None]
 
 
 def download_checkpoint(
@@ -218,12 +219,7 @@ def _prepare_frames(
     offload_video_to_cpu: bool,
     interrupt_callback: InterruptCallback | None = None,
 ):
-    if kind == "sam2":
-        mean = (0.485, 0.456, 0.406)
-        std = (0.229, 0.224, 0.225)
-    else:
-        mean = (0.5, 0.5, 0.5)
-        std = (0.5, 0.5, 0.5)
+    mean, std = frame_normalization(kind)
 
     if offload_video_to_cpu:
         return _LazyFrameSequence(images, image_size, mean, std)
@@ -236,6 +232,15 @@ def _prepare_frames(
             _resize_and_normalize_frame(frame, image_size, mean, std, device)
         )
     return torch.stack(prepared, dim=0)
+
+
+def frame_normalization(kind: str) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """Return the normalization used by the selected temporal backbone."""
+    if kind == "sam2":
+        return (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
+    if kind == "sam3":
+        return (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)
+    raise ValueError(f"Unknown predictor kind: {kind}")
 
 
 def prepare_seed_mask(
@@ -344,7 +349,9 @@ def _init_sam2_state(
         "video_height": height,
         "video_width": width,
         "device": compute_device,
-        "storage_device": torch.device("cpu") if offload_state_to_cpu else compute_device,
+        "storage_device": torch.device("cpu")
+        if offload_state_to_cpu
+        else compute_device,
         "point_inputs_per_obj": {},
         "mask_inputs_per_obj": {},
         "cached_features": {},
@@ -397,7 +404,9 @@ def _extract_propagated_alpha(result) -> tuple[int, object]:
 
 
 def _alpha_to_2d(alpha, height: int, width: int) -> torch.Tensor:
-    alpha_tensor = torch.as_tensor(np.asarray(alpha) if isinstance(alpha, np.ndarray) else alpha)
+    alpha_tensor = torch.as_tensor(
+        np.asarray(alpha) if isinstance(alpha, np.ndarray) else alpha
+    )
     alpha_tensor = alpha_tensor.detach().float().cpu().squeeze()
     if alpha_tensor.ndim != 2:
         raise RuntimeError(
@@ -469,7 +478,9 @@ class SAM2MattingVideoModel:
         self.predictor = self._build_predictor(str(checkpoint_path))
 
     @classmethod
-    def from_predictor(cls, variant: str, predictor, device: str | torch.device = "cpu"):
+    def from_predictor(
+        cls, variant: str, predictor, device: str | torch.device = "cpu"
+    ):
         """Testing/embedding constructor that skips checkpoint loading."""
         instance = cls.__new__(cls)
         instance.variant = variant
@@ -484,7 +495,9 @@ class SAM2MattingVideoModel:
 
     def _build_predictor(self, checkpoint_path: str):
         if not Path(checkpoint_path).is_file():
-            raise FileNotFoundError(f"SAM2Matting checkpoint not found: {checkpoint_path}")
+            raise FileNotFoundError(
+                f"SAM2Matting checkpoint not found: {checkpoint_path}"
+            )
         if self.kind == "sam2":
             return self._build_sam2(checkpoint_path)
         return self._build_sam3(checkpoint_path)
@@ -521,7 +534,9 @@ class SAM2MattingVideoModel:
 
     def _build_sam3(self, checkpoint_path: str):
         if self.device.type != "cuda":
-            raise RuntimeError("The upstream SAM3 video predictor currently requires CUDA.")
+            raise RuntimeError(
+                "The upstream SAM3 video predictor currently requires CUDA."
+            )
         _activate_vendored_package(SAM3_VENDOR_PACKAGE)
         from iopath.common.file_io import g_pathmgr
         from comfyui_sam2matting_sam3.model.sam3matting_video_predictor import (
@@ -566,7 +581,9 @@ class SAM2MattingVideoModel:
 
             bpe_path = VENDOR_DIR / SAM3_VENDOR_PACKAGE / "bpe_simple_vocab_16e6.txt.gz"
             if not bpe_path.is_file():
-                raise FileNotFoundError(f"SAM3 tokenizer vocabulary not found: {bpe_path}")
+                raise FileNotFoundError(
+                    f"SAM3 tokenizer vocabulary not found: {bpe_path}"
+                )
             self._sam3_text_model = build_sam3_image_model(
                 bpe_path=str(bpe_path),
                 device="cpu",
@@ -614,7 +631,9 @@ class SAM2MattingVideoModel:
         if frame_count < 1:
             raise ValueError("images must contain at least one frame")
         if channels < 3:
-            raise ValueError(f"images must have at least three color channels, got {channels}")
+            raise ValueError(
+                f"images must have at least three color channels, got {channels}"
+            )
         if not 0 <= int(frame_index) < frame_count:
             raise ValueError(
                 f"frame_index must be between 0 and {frame_count - 1}, got {frame_index}"
@@ -693,7 +712,9 @@ class SAM2MattingVideoModel:
         if frame_count < 1:
             raise ValueError("images must contain at least one frame")
         if channels < 3:
-            raise ValueError(f"images must have at least three color channels, got {channels}")
+            raise ValueError(
+                f"images must have at least three color channels, got {channels}"
+            )
         if not 0 <= int(mask_frame) < frame_count:
             raise ValueError(
                 f"mask_frame must be between 0 and {frame_count - 1}, got {mask_frame}"
@@ -716,23 +737,119 @@ class SAM2MattingVideoModel:
 
         if interrupt_callback is not None:
             interrupt_callback()
-        with self._run_lock, torch.inference_mode(), _autocast_context(self.device):
-            frames = _prepare_frames(
-                images,
-                image_size,
-                self.kind,
-                self.device,
-                offload_video,
-                interrupt_callback,
+        frames = _prepare_frames(
+            images,
+            image_size,
+            self.kind,
+            self.device,
+            offload_video,
+            interrupt_callback,
+        )
+        alphas: list[torch.Tensor | None] = [None] * frame_count
+
+        def collect_alpha(frame_index: int, alpha: torch.Tensor) -> None:
+            alphas[frame_index] = alpha
+
+        self._propagate_frame_sequence(
+            frames=frames,
+            frame_count=frame_count,
+            height=height,
+            width=width,
+            seed_mask=seed_mask,
+            mask_frame=int(mask_frame),
+            offload_video_to_cpu=offload_video,
+            offload_state_to_cpu=offload_state,
+            alpha_callback=collect_alpha,
+            progress_callback=progress_callback,
+            interrupt_callback=interrupt_callback,
+        )
+        return torch.stack(alphas, dim=0).float()  # type: ignore[arg-type]
+
+    def matte_frame_sequence(
+        self,
+        frames: Sequence[torch.Tensor],
+        height: int,
+        width: int,
+        initial_mask: torch.Tensor,
+        mask_frame: int = 0,
+        mask_threshold: float = 0.5,
+        memory_mode: str = "balanced",
+        alpha_callback: AlphaCallback | None = None,
+        progress_callback: ProgressCallback | None = None,
+        interrupt_callback: InterruptCallback | None = None,
+    ) -> None:
+        """Propagate over a normalized, file-backed frame sequence.
+
+        Unlike :meth:`matte_video`, this API never collects a full alpha batch.
+        Each completed full-resolution matte is delivered to ``alpha_callback``
+        and can be written to disk immediately.
+        """
+        frame_count = len(frames)
+        if frame_count < 1:
+            raise ValueError("frames must contain at least one frame")
+        if height < 1 or width < 1:
+            raise ValueError(f"Invalid video dimensions: {width}x{height}")
+        if not 0 <= int(mask_frame) < frame_count:
+            raise ValueError(
+                f"mask_frame must be between 0 and {frame_count - 1}, got {mask_frame}"
             )
+        if memory_mode not in MEMORY_MODES:
+            raise ValueError(
+                f"Unknown memory_mode {memory_mode!r}; choose one of {tuple(MEMORY_MODES)}"
+            )
+        if alpha_callback is None:
+            raise ValueError("alpha_callback is required for file-backed propagation")
+
+        seed_mask = prepare_seed_mask(
+            initial_mask,
+            int(mask_frame),
+            frame_count,
+            int(height),
+            int(width),
+            float(mask_threshold),
+        )
+        _ignored_video_mode, offload_state = MEMORY_MODES[memory_mode]
+        if interrupt_callback is not None:
+            interrupt_callback()
+        self._propagate_frame_sequence(
+            frames=frames,
+            frame_count=frame_count,
+            height=int(height),
+            width=int(width),
+            seed_mask=seed_mask,
+            mask_frame=int(mask_frame),
+            offload_video_to_cpu=True,
+            offload_state_to_cpu=offload_state,
+            alpha_callback=alpha_callback,
+            progress_callback=progress_callback,
+            interrupt_callback=interrupt_callback,
+        )
+
+    def _propagate_frame_sequence(
+        self,
+        *,
+        frames,
+        frame_count: int,
+        height: int,
+        width: int,
+        seed_mask: torch.Tensor,
+        mask_frame: int,
+        offload_video_to_cpu: bool,
+        offload_state_to_cpu: bool,
+        alpha_callback: AlphaCallback,
+        progress_callback: ProgressCallback | None,
+        interrupt_callback: InterruptCallback | None,
+    ) -> None:
+        """Run one predictor state and emit alphas without retaining them."""
+        with self._run_lock, torch.inference_mode(), _autocast_context(self.device):
             if self.kind == "sam2":
                 state = _init_sam2_state(
                     self.predictor,
                     frames,
                     height,
                     width,
-                    offload_video,
-                    offload_state,
+                    offload_video_to_cpu,
+                    offload_state_to_cpu,
                 )
             else:
                 state = _init_sam3_state(
@@ -740,43 +857,44 @@ class SAM2MattingVideoModel:
                     frames,
                     height,
                     width,
-                    offload_video,
-                    offload_state,
+                    offload_video_to_cpu,
+                    offload_state_to_cpu,
                 )
 
-            alphas: list[torch.Tensor | None] = [None] * frame_count
             completed: set[int] = set()
             try:
                 if interrupt_callback is not None:
                     interrupt_callback()
                 self.predictor.add_new_mask(
                     inference_state=state,
-                    frame_idx=int(mask_frame),
+                    frame_idx=mask_frame,
                     obj_id=1,
                     mask=seed_mask.to(self.device),
                 )
-                for result in _propagation_passes(
-                    self.predictor, state, int(mask_frame)
-                ):
+                for result in _propagation_passes(self.predictor, state, mask_frame):
                     if interrupt_callback is not None:
                         interrupt_callback()
-                    frame_index, alpha = _extract_propagated_alpha(result)
+                    frame_index, raw_alpha = _extract_propagated_alpha(result)
                     if not 0 <= frame_index < frame_count:
                         raise RuntimeError(
                             f"Predictor returned out-of-range frame index {frame_index}"
                         )
-                    alphas[frame_index] = _alpha_to_2d(alpha, height, width)
+                    alpha_callback(
+                        frame_index,
+                        _alpha_to_2d(raw_alpha, height, width),
+                    )
                     completed.add(frame_index)
                     if progress_callback is not None:
                         progress_callback(len(completed), frame_count)
 
-                missing = [index for index, alpha in enumerate(alphas) if alpha is None]
+                missing = [
+                    index for index in range(frame_count) if index not in completed
+                ]
                 if missing:
                     raise RuntimeError(
                         "Temporal propagation did not return every input frame; missing "
                         + ", ".join(map(str, missing[:20]))
                     )
-                return torch.stack(alphas, dim=0).float()  # type: ignore[arg-type]
             finally:
                 try:
                     self.predictor.reset_state(state)
