@@ -167,3 +167,44 @@ def test_native_video_pipeline_preserves_audio_without_buffering_a_tensor(tmp_pa
 
     alphas.close()
     frames.close()
+
+
+@pytest.mark.parametrize(("output_fps", "expected_frames"), [(2.0, 2), (8.0, 8)])
+def test_native_video_pipeline_converts_fps_without_changing_duration(
+    tmp_path, output_fps, expected_frames
+):
+    source_path = tmp_path / "source.mp4"
+    _write_test_video(source_path)
+    video = FakeNativeVideo(source_path)
+    frames, info = prepare_tracking_frames(
+        video,
+        tmp_path / "tracking.frames",
+        image_size=8,
+        kind="sam2",
+    )
+    alphas = DiskAlphaStore(tmp_path / "alpha.frames", 4, 12, 16)
+    for index in range(4):
+        alphas.write(index, torch.ones(12, 16))
+    alphas.flush()
+    output_path = tmp_path / f"output-{output_fps}.mp4"
+
+    encode_background_video(
+        video,
+        alphas,
+        info,
+        background=(128, 128, 128),
+        output_path=output_path,
+        video_only_path=tmp_path / f"video-only-{output_fps}.mp4",
+        output_fps=output_fps,
+        preserve_audio=False,
+    )
+
+    with av.open(str(output_path)) as container:
+        stream = container.streams.video[0]
+        decoded = list(container.decode(stream))
+        assert Fraction(stream.average_rate) == Fraction(int(output_fps))
+    assert len(decoded) == expected_frames
+    assert len(decoded) / output_fps == pytest.approx(1.0)
+
+    alphas.close()
+    frames.close()

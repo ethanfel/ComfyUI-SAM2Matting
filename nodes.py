@@ -232,6 +232,10 @@ class SAM2MattingVideoBackground:
                     ["gpu", "cpu"],
                     {"default": "gpu"},
                 ),
+                "output_fps": (
+                    "FLOAT",
+                    {"default": 0.0, "min": 0.0, "max": 240.0, "step": 0.01},
+                ),
                 "crf": (
                     "INT",
                     {"default": 18, "min": 0, "max": 51, "step": 1},
@@ -260,6 +264,7 @@ class SAM2MattingVideoBackground:
         mask_threshold: float,
         background_color: str,
         state_device: str,
+        output_fps: float,
         crf: int,
         preserve_audio: bool,
     ):
@@ -341,6 +346,7 @@ class SAM2MattingVideoBackground:
                     background=background,
                     output_path=output_path,
                     video_only_path=work_path / "composited_video.mp4",
+                    output_fps=float(output_fps),
                     crf=int(crf),
                     preserve_audio=bool(preserve_audio),
                     progress_callback=encoding_progress,

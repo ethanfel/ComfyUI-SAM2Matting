@@ -282,56 +282,89 @@ def _encode_video_only(
     info: VideoInfo,
     background: tuple[int, int, int],
     output_path: str | os.PathLike[str],
+    output_fps: float,
     crf: int,
     progress_callback: ProgressCallback | None,
     interrupt_callback: InterruptCallback | None,
-) -> None:
+) -> VideoInfo:
     if info.width % 2 or info.height % 2:
         raise ValueError(
             "H.264 output requires even video dimensions, got "
             f"{info.width}x{info.height}"
         )
+    output_rate = (
+        info.frame_rate
+        if float(output_fps) <= 0.0
+        else Fraction(str(float(output_fps))).limit_denominator(100_000)
+    )
+    output_frame_count = max(
+        1,
+        int(round(Fraction(info.frame_count) * output_rate / info.frame_rate)),
+    )
     with av.open(
         str(output_path),
         mode="w",
         format="mp4",
         options={"movflags": "use_metadata_tags+faststart"},
     ) as output:
-        stream = output.add_stream("h264", rate=info.frame_rate)
+        stream = output.add_stream("h264", rate=output_rate)
         stream.width = info.width
         stream.height = info.height
         stream.pix_fmt = "yuv420p"
         stream.options = {"crf": str(int(crf))}
         stream.codec_context.max_b_frames = 0
-        time_base = Fraction(info.frame_rate.denominator, info.frame_rate.numerator)
+        time_base = Fraction(output_rate.denominator, output_rate.numerator)
         encoded = 0
+        decoded = 0
         for frame_index, rgb in enumerate(iter_rgb_frames(video)):
             if frame_index >= info.frame_count:
                 break
+            decoded += 1
             if interrupt_callback is not None:
                 interrupt_callback()
             if tuple(rgb.shape[:2]) != (info.height, info.width):
                 raise ValueError("Decoded video dimensions changed between passes")
+            source_for_output = min(
+                info.frame_count - 1,
+                int(Fraction(encoded) * info.frame_rate / output_rate),
+            )
+            if source_for_output != frame_index:
+                if progress_callback is not None:
+                    progress_callback(decoded, info.frame_count)
+                continue
             composited = _composite_rgb(
                 rgb,
                 alpha_store.as_float(frame_index),
                 background,
             )
-            frame = av.VideoFrame.from_ndarray(composited, format="rgb24")
-            frame.pts = frame_index
-            frame.time_base = time_base
-            for packet in stream.encode(frame):
-                output.mux(packet)
-            encoded += 1
+            while encoded < output_frame_count:
+                source_for_output = min(
+                    info.frame_count - 1,
+                    int(Fraction(encoded) * info.frame_rate / output_rate),
+                )
+                if source_for_output != frame_index:
+                    break
+                frame = av.VideoFrame.from_ndarray(composited, format="rgb24")
+                frame.pts = encoded
+                frame.time_base = time_base
+                for packet in stream.encode(frame):
+                    output.mux(packet)
+                encoded += 1
             if progress_callback is not None:
-                progress_callback(encoded, info.frame_count)
-        if encoded != info.frame_count:
+                progress_callback(decoded, info.frame_count)
+        if decoded != info.frame_count:
             raise RuntimeError(
-                f"Video decode returned {encoded} frames on the output pass; "
+                f"Video decode returned {decoded} frames on the output pass; "
                 f"tracking used {info.frame_count}"
+            )
+        if encoded != output_frame_count:
+            raise RuntimeError(
+                f"FPS conversion produced {encoded} frames, expected "
+                f"{output_frame_count}"
             )
         for packet in stream.encode(None):
             output.mux(packet)
+    return VideoInfo(output_frame_count, info.width, info.height, output_rate)
 
 
 def _audio_stream(container):
@@ -484,22 +517,26 @@ def encode_background_video(
     background: tuple[int, int, int],
     output_path: str | os.PathLike[str],
     video_only_path: str | os.PathLike[str],
+    output_fps: float = 0.0,
     crf: int = 18,
     preserve_audio: bool = True,
     progress_callback: ProgressCallback | None = None,
     interrupt_callback: InterruptCallback | None = None,
 ) -> None:
     """Composite and encode without constructing an IMAGE batch."""
-    _encode_video_only(
+    output_info = _encode_video_only(
         video,
         alpha_store,
         info,
         background,
         video_only_path,
+        output_fps,
         crf,
         progress_callback,
         interrupt_callback,
     )
-    if preserve_audio and _mux_source_audio(video, video_only_path, output_path, info):
+    if preserve_audio and _mux_source_audio(
+        video, video_only_path, output_path, output_info
+    ):
         return
     os.replace(video_only_path, output_path)

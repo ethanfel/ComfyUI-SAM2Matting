@@ -16,7 +16,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "SAM2Matting — streaming grey-background workflow\n\n1. Enter a video path that exists inside the ComfyUI machine/container, then load a black/white seed mask. White = foreground.\n2. The seed mask must match mask_frame (zero-based).\n3. background_color defaults to middle grey (#808080).\n4. gpu keeps temporal state on the GPU; cpu trades VRAM for system RAM.\n\nThe path loader bypasses ComfyUI's browser upload-size limit. The node streams frames through compressed temporary files and returns a native VIDEO without creating a full IMAGE or MASK batch."
+        "SAM2Matting — streaming grey-background workflow\n\n1. Enter a video path that exists inside the ComfyUI machine/container, then load a black/white seed mask. White = foreground.\n2. The seed mask must match mask_frame (zero-based).\n3. background_color defaults to middle grey (#808080).\n4. output_fps = 0 keeps the source FPS; set a positive FPS to convert while preserving duration.\n5. gpu keeps temporal state on the GPU; cpu trades VRAM for system RAM.\n\nThe path loader bypasses ComfyUI's browser upload-size limit. The node streams frames through compressed temporary files and returns a native VIDEO without creating a full IMAGE or MASK batch."
       ],
       "color": "#243447",
       "bgcolor": "#34506b"
@@ -97,6 +97,7 @@
         {"name": "mask_threshold", "type": "FLOAT", "widget": {"name": "mask_threshold"}, "link": null},
         {"name": "background_color", "type": "STRING", "widget": {"name": "background_color"}, "link": null},
         {"name": "state_device", "type": "COMBO", "widget": {"name": "state_device"}, "link": null},
+        {"name": "output_fps", "type": "FLOAT", "widget": {"name": "output_fps"}, "link": null},
         {"name": "crf", "type": "INT", "widget": {"name": "crf"}, "link": null},
         {"name": "preserve_audio", "type": "BOOLEAN", "widget": {"name": "preserve_audio"}, "link": null}
       ],
@@ -107,7 +108,7 @@
         "aux_id": "ethanfel/ComfyUI-SAM2Matting",
         "Node name for S&R": "SAM2MattingVideoBackground"
       },
-      "widgets_values": [0, 0.5, "#808080", "gpu", 18, true]
+      "widgets_values": [0, 0.5, "#808080", "gpu", 0.0, 18, true]
     },
     {
       "id": 5,

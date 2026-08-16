@@ -165,6 +165,8 @@ solid background color.
 - `state_device`:
   - `gpu`: recommended; keeps the tracker's temporal state out of system RAM
   - `cpu`: lowers VRAM use but temporal state grows in system RAM
+- `output_fps`: `0` keeps the source FPS; a positive value converts FPS while
+  preserving duration by dropping or duplicating frames
 - `crf`: H.264 quality; lower is higher quality and larger
 - `preserve_audio`: transcodes the active source audio to AAC
 
