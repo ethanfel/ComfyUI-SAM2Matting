@@ -256,35 +256,114 @@ class SAM2MattingStreamingOptions:
             "required": {
                 "cache_mode": (
                     list(TRACKING_CACHE_MODES),
-                    {"default": "lossless_zstd"},
+                    {
+                        "default": "lossless_zstd",
+                        "tooltip": (
+                            "Temporary model-resolution frame format. "
+                            "lossless_zstd preserves the exact resized RGB "
+                            "(recommended); jpeg_low_disk uses less disk but is "
+                            "slightly lossy; raw_fast avoids compression but uses "
+                            "the most temporary disk space."
+                        ),
+                    },
                 ),
                 "worker_threads": (
                     "INT",
-                    {"default": 4, "min": 1, "max": 32, "step": 1},
+                    {
+                        "default": 4,
+                        "min": 1,
+                        "max": 32,
+                        "step": 1,
+                        "tooltip": (
+                            "Maximum CPU workers used for frame preparation, "
+                            "alpha PNG writing, and background compositing. More "
+                            "workers can help until the CPU or disk is saturated. "
+                            "This does not parallelize temporal SAM inference."
+                        ),
+                    },
                 ),
                 "pipeline_depth": (
                     "INT",
-                    {"default": 8, "min": 1, "max": 64, "step": 1},
+                    {
+                        "default": 8,
+                        "min": 1,
+                        "max": 64,
+                        "step": 1,
+                        "tooltip": (
+                            "Maximum frames allowed in flight in each bounded CPU "
+                            "pipeline. 8 is recommended. Higher values may hide "
+                            "CPU/disk latency but use more RAM; try 2–4 under RAM "
+                            "pressure. This is a queue limit, not a SAM batch size."
+                        ),
+                    },
                 ),
                 "video_encoder": (
                     list(VIDEO_ENCODERS),
-                    {"default": "auto"},
+                    {
+                        "default": "auto",
+                        "tooltip": (
+                            "H.264 encoder for the final composited video. auto "
+                            "tries NVIDIA NVENC first and falls back to CPU "
+                            "libx264 if NVENC cannot start."
+                        ),
+                    },
                 ),
                 "output_fps": (
                     "FLOAT",
-                    {"default": 0.0, "min": 0.0, "max": 240.0, "step": 0.01},
+                    {
+                        "default": 0.0,
+                        "min": 0.0,
+                        "max": 240.0,
+                        "step": 0.01,
+                        "tooltip": (
+                            "Final frame rate. 0 keeps the source rate. A positive "
+                            "value drops or duplicates frames while preserving "
+                            "the clip duration."
+                        ),
+                    },
                 ),
                 "crf": (
                     "INT",
-                    {"default": 18, "min": 0, "max": 51, "step": 1},
+                    {
+                        "default": 18,
+                        "min": 0,
+                        "max": 51,
+                        "step": 1,
+                        "tooltip": (
+                            "Final H.264 quality target. Lower values preserve more "
+                            "detail and create larger files. With NVENC this is "
+                            "mapped to its comparable constant-quality control."
+                        ),
+                    },
                 ),
-                "preserve_audio": ("BOOLEAN", {"default": True}),
-                "verbose_log": ("BOOLEAN", {"default": True}),
+                "preserve_audio": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": (
+                            "Keep the active source audio by streaming it into the "
+                            "result as AAC. Disable for a silent output."
+                        ),
+                    },
+                ),
+                "verbose_log": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": (
+                            "Log stage progress, throughput, actual compute device, "
+                            "temporary cache sizes, and CUDA memory."
+                        ),
+                    },
+                ),
             }
         }
 
     RETURN_TYPES = (STREAMING_OPTIONS_TYPE,)
     RETURN_NAMES = ("streaming_options",)
+    OUTPUT_TOOLTIPS = (
+        "Advanced bounded-pipeline and output controls for the streaming node.",
+    )
     FUNCTION = "configure"
     CATEGORY = "SAM2Matting/video"
     DESCRIPTION = (
@@ -326,33 +405,97 @@ class SAM2MattingVideoBackground:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model": (MODEL_TYPE,),
-                "video": ("VIDEO",),
-                "initial_mask": ("MASK",),
+                "model": (
+                    MODEL_TYPE,
+                    {"tooltip": "Loaded SAM2Matting temporal video model."},
+                ),
+                "video": (
+                    "VIDEO",
+                    {
+                        "tooltip": (
+                            "Native, file-backed ComfyUI video. Use Load Video Path "
+                            "(Native) for files too large for browser upload."
+                        )
+                    },
+                ),
+                "initial_mask": (
+                    "MASK",
+                    {
+                        "tooltip": (
+                            "Seed mask for one source frame: white is the foreground "
+                            "subject to keep, black is background."
+                        )
+                    },
+                ),
                 "mask_frame": (
                     "INT",
-                    {"default": 0, "min": 0, "max": 2**31 - 1, "step": 1},
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 2**31 - 1,
+                        "step": 1,
+                        "tooltip": (
+                            "Zero-based video frame that matches initial_mask. "
+                            "Tracking propagates forward and, when needed, backward "
+                            "from this frame."
+                        ),
+                    },
                 ),
                 "mask_threshold": (
                     "FLOAT",
-                    {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01},
+                    {
+                        "default": 0.5,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "tooltip": (
+                            "Threshold used only to turn the seed mask into a binary "
+                            "tracking prompt. It does not threshold the soft output "
+                            "matte."
+                        ),
+                    },
                 ),
                 "background_color": (
                     "STRING",
-                    {"default": "#808080", "multiline": False},
+                    {
+                        "default": "#808080",
+                        "multiline": False,
+                        "tooltip": (
+                            "Solid RGB background written behind the extracted "
+                            "foreground, as a six-digit hex color such as #808080."
+                        ),
+                    },
                 ),
                 "state_device": (
                     ["gpu", "cpu"],
-                    {"default": "gpu"},
+                    {
+                        "default": "gpu",
+                        "tooltip": (
+                            "Where the bounded temporal tracking state is stored. "
+                            "gpu is faster and avoids system-RAM pressure; cpu saves "
+                            "VRAM but is slower and uses host RAM."
+                        ),
+                    },
                 ),
             },
             "optional": {
-                "streaming_options": (STREAMING_OPTIONS_TYPE,),
+                "streaming_options": (
+                    STREAMING_OPTIONS_TYPE,
+                    {
+                        "tooltip": (
+                            "Optional advanced settings from SAM2Matting Streaming "
+                            "Options. Leave disconnected for recommended defaults."
+                        )
+                    },
+                ),
             },
         }
 
     RETURN_TYPES = ("VIDEO",)
     RETURN_NAMES = ("video",)
+    OUTPUT_TOOLTIPS = (
+        "File-backed H.264 MP4 with the tracked foreground composited over the chosen color.",
+    )
     FUNCTION = "composite"
     CATEGORY = "SAM2Matting/video"
     DESCRIPTION = (
