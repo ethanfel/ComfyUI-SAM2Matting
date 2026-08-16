@@ -1,8 +1,8 @@
 {
   "id": "0eb7e98f-27d1-40f1-aed0-bc5e301cae42",
   "revision": 0,
-  "last_node_id": 12,
-  "last_link_id": 4,
+  "last_node_id": 13,
+  "last_link_id": 5,
   "nodes": [
     {
       "id": 12,
@@ -16,7 +16,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "SAM2Matting — streaming grey-background workflow\n\n1. Enter a video path that exists inside the ComfyUI machine/container, then load a black/white seed mask. White = foreground.\n2. The seed mask must match mask_frame (zero-based).\n3. background_color defaults to middle grey (#808080).\n4. output_fps = 0 keeps the source FPS; set a positive FPS to convert while preserving duration.\n5. gpu keeps temporal state on the GPU; cpu trades VRAM for system RAM.\n\nThe path loader bypasses ComfyUI's browser upload-size limit. The node streams frames through compressed temporary files and returns a native VIDEO without creating a full IMAGE or MASK batch."
+        "SAM2Matting — streaming grey-background workflow\n\n1. Enter a video path visible inside the ComfyUI machine/container, then load a black/white seed mask. White = foreground.\n2. The seed mask must match mask_frame (zero-based).\n3. background_color defaults to middle grey (#808080).\n4. gpu keeps the bounded temporal state on the GPU; cpu trades VRAM for system RAM.\n5. Streaming Options contains cache, worker, encoder, FPS, quality, audio, and logging controls. It is optional; the main node has safe defaults without it.\n\nThe path loader bypasses the browser upload limit. Lossless Zstandard tracking frames are the default. Processing uses bounded queues and returns a native VIDEO without creating a full IMAGE or MASK batch."
       ],
       "color": "#243447",
       "bgcolor": "#34506b"
@@ -82,12 +82,39 @@
       "widgets_values": ["seed_mask.png", "red", "image"]
     },
     {
+      "id": 13,
+      "type": "SAM2MattingStreamingOptions",
+      "pos": [448, 560],
+      "size": [384, 288],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {"name": "cache_mode", "type": "COMBO", "widget": {"name": "cache_mode"}, "link": null},
+        {"name": "worker_threads", "type": "INT", "widget": {"name": "worker_threads"}, "link": null},
+        {"name": "pipeline_depth", "type": "INT", "widget": {"name": "pipeline_depth"}, "link": null},
+        {"name": "video_encoder", "type": "COMBO", "widget": {"name": "video_encoder"}, "link": null},
+        {"name": "output_fps", "type": "FLOAT", "widget": {"name": "output_fps"}, "link": null},
+        {"name": "crf", "type": "INT", "widget": {"name": "crf"}, "link": null},
+        {"name": "preserve_audio", "type": "BOOLEAN", "widget": {"name": "preserve_audio"}, "link": null},
+        {"name": "verbose_log", "type": "BOOLEAN", "widget": {"name": "verbose_log"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "streaming_options", "type": "SAM2MATTING_STREAMING_OPTIONS", "slot_index": 0, "links": [5]}
+      ],
+      "properties": {
+        "aux_id": "ethanfel/ComfyUI-SAM2Matting",
+        "Node name for S&R": "SAM2MattingStreamingOptions"
+      },
+      "widgets_values": ["lossless_zstd", 4, 8, "auto", 0.0, 18, true, true]
+    },
+    {
       "id": 4,
       "type": "SAM2MattingVideoBackground",
       "pos": [448, 176],
       "size": [384, 288],
       "flags": {},
-      "order": 4,
+      "order": 5,
       "mode": 0,
       "inputs": [
         {"name": "model", "type": "SAM2MATTING_VIDEO_MODEL", "link": 1},
@@ -97,10 +124,7 @@
         {"name": "mask_threshold", "type": "FLOAT", "widget": {"name": "mask_threshold"}, "link": null},
         {"name": "background_color", "type": "STRING", "widget": {"name": "background_color"}, "link": null},
         {"name": "state_device", "type": "COMBO", "widget": {"name": "state_device"}, "link": null},
-        {"name": "output_fps", "type": "FLOAT", "widget": {"name": "output_fps"}, "link": null},
-        {"name": "crf", "type": "INT", "widget": {"name": "crf"}, "link": null},
-        {"name": "preserve_audio", "type": "BOOLEAN", "widget": {"name": "preserve_audio"}, "link": null},
-        {"name": "verbose_log", "type": "BOOLEAN", "widget": {"name": "verbose_log"}, "link": null}
+        {"name": "streaming_options", "type": "SAM2MATTING_STREAMING_OPTIONS", "link": 5}
       ],
       "outputs": [
         {"name": "video", "type": "VIDEO", "slot_index": 0, "links": [4]}
@@ -109,7 +133,7 @@
         "aux_id": "ethanfel/ComfyUI-SAM2Matting",
         "Node name for S&R": "SAM2MattingVideoBackground"
       },
-      "widgets_values": [0, 0.5, "#808080", "gpu", 0.0, 18, true, true]
+      "widgets_values": [0, 0.5, "#808080", "gpu"]
     },
     {
       "id": 5,
@@ -117,7 +141,7 @@
       "pos": [912, 176],
       "size": [416, 352],
       "flags": {},
-      "order": 5,
+      "order": 6,
       "mode": 0,
       "inputs": [
         {"name": "video", "type": "VIDEO", "link": 4},
@@ -137,11 +161,12 @@
     [1, 1, 0, 4, 0, "SAM2MATTING_VIDEO_MODEL"],
     [2, 2, 0, 4, 1, "VIDEO"],
     [3, 3, 0, 4, 2, "MASK"],
-    [4, 4, 0, 5, 0, "VIDEO"]
+    [4, 4, 0, 5, 0, "VIDEO"],
+    [5, 13, 0, 4, 7, "SAM2MATTING_STREAMING_OPTIONS"]
   ],
   "groups": [
     {"id": 1, "title": "1. Load native video, mask, and model", "bounding": [-32, -32, 400, 960], "color": "#3f789e", "flags": {}},
-    {"id": 2, "title": "2. Stream matte and composite", "bounding": [416, 112, 448, 416], "color": "#6a4c93", "flags": {}},
+    {"id": 2, "title": "2. Stream matte and composite", "bounding": [416, 112, 448, 768], "color": "#6a4c93", "flags": {}},
     {"id": 3, "title": "3. Save native video", "bounding": [880, 112, 480, 480], "color": "#438a5e", "flags": {}}
   ],
   "config": {},

@@ -427,6 +427,10 @@ def _propagation_passes(
     state,
     mask_frame: int,
 ) -> Iterator[tuple[bool, tuple]]:
+    frames = state.get("images")
+    set_prefetch_direction = getattr(frames, "set_prefetch_direction", None)
+    if set_prefetch_direction is not None:
+        set_prefetch_direction(mask_frame, 1)
     for result in predictor.propagate_in_video(
         state,
         start_frame_idx=mask_frame,
@@ -436,6 +440,8 @@ def _propagation_passes(
     ):
         yield False, result
     if mask_frame > 0:
+        if set_prefetch_direction is not None:
+            set_prefetch_direction(mask_frame, -1)
         for result in predictor.propagate_in_video(
             state,
             start_frame_idx=mask_frame,

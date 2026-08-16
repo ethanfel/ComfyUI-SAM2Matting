@@ -67,6 +67,19 @@ def test_streaming_workflow_never_converts_native_video_to_an_image_batch():
     assert "GetVideoComponents" not in node_types
     assert [output["type"] for output in streaming["outputs"]] == ["VIDEO"]
 
+    options = next(
+        node
+        for node in workflow["nodes"]
+        if node["type"] == "SAM2MattingStreamingOptions"
+    )
+    assert streaming["inputs"][7]["name"] == "streaming_options"
+    assert options["widgets_values"][:4] == [
+        "lossless_zstd",
+        4,
+        8,
+        "auto",
+    ]
+
 
 def test_matting_node_api_exposes_only_alpha():
     module = ast.parse((REPO_ROOT / "nodes.py").read_text(encoding="utf-8"))

@@ -10,3 +10,4 @@ einops
 ftfy
 regex
 psutil
+zstandard

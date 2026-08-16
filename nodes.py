@@ -24,6 +24,8 @@ from .video_model import (
     make_checkerboard_preview,
 )
 from .streaming_video import (
+    TRACKING_CACHE_MODES,
+    VIDEO_ENCODERS,
     DiskAlphaStore,
     encode_background_video,
     parse_hex_color,
@@ -33,7 +35,19 @@ from .streaming_video import (
 
 MODEL_FOLDER = "sam2matting"
 MODEL_TYPE = "SAM2MATTING_VIDEO_MODEL"
+STREAMING_OPTIONS_TYPE = "SAM2MATTING_STREAMING_OPTIONS"
 LOGGER = logging.getLogger("SAM2Matting")
+
+DEFAULT_STREAMING_OPTIONS = {
+    "cache_mode": "lossless_zstd",
+    "worker_threads": 4,
+    "pipeline_depth": 8,
+    "video_encoder": "auto",
+    "output_fps": 0.0,
+    "crf": 18,
+    "preserve_audio": True,
+    "verbose_log": True,
+}
 
 
 def _predictor_device(model: SAM2MattingVideoModel) -> torch.device:
@@ -233,6 +247,78 @@ class SAM2MattingVideo:
         return (alpha,)
 
 
+class SAM2MattingStreamingOptions:
+    """Advanced performance and encoding controls for the streaming node."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "cache_mode": (
+                    list(TRACKING_CACHE_MODES),
+                    {"default": "lossless_zstd"},
+                ),
+                "worker_threads": (
+                    "INT",
+                    {"default": 4, "min": 1, "max": 32, "step": 1},
+                ),
+                "pipeline_depth": (
+                    "INT",
+                    {"default": 8, "min": 1, "max": 64, "step": 1},
+                ),
+                "video_encoder": (
+                    list(VIDEO_ENCODERS),
+                    {"default": "auto"},
+                ),
+                "output_fps": (
+                    "FLOAT",
+                    {"default": 0.0, "min": 0.0, "max": 240.0, "step": 0.01},
+                ),
+                "crf": (
+                    "INT",
+                    {"default": 18, "min": 0, "max": 51, "step": 1},
+                ),
+                "preserve_audio": ("BOOLEAN", {"default": True}),
+                "verbose_log": ("BOOLEAN", {"default": True}),
+            }
+        }
+
+    RETURN_TYPES = (STREAMING_OPTIONS_TYPE,)
+    RETURN_NAMES = ("streaming_options",)
+    FUNCTION = "configure"
+    CATEGORY = "SAM2Matting/video"
+    DESCRIPTION = (
+        "Optional advanced controls for the streaming background node. Lossless "
+        "Zstandard is the quality-safe default; JPEG saves disk space and raw RGB "
+        "trades disk space for cache speed. Auto encoding prefers NVENC and falls "
+        "back to libx264."
+    )
+
+    def configure(
+        self,
+        cache_mode: str,
+        worker_threads: int,
+        pipeline_depth: int,
+        video_encoder: str,
+        output_fps: float,
+        crf: int,
+        preserve_audio: bool,
+        verbose_log: bool,
+    ):
+        return (
+            {
+                "cache_mode": cache_mode,
+                "worker_threads": max(1, int(worker_threads)),
+                "pipeline_depth": max(1, int(pipeline_depth)),
+                "video_encoder": video_encoder,
+                "output_fps": float(output_fps),
+                "crf": int(crf),
+                "preserve_audio": bool(preserve_audio),
+                "verbose_log": bool(verbose_log),
+            },
+        )
+
+
 class SAM2MattingVideoBackground:
     """Composite a native VIDEO over a solid color without IMAGE batches."""
 
@@ -259,18 +345,9 @@ class SAM2MattingVideoBackground:
                     ["gpu", "cpu"],
                     {"default": "gpu"},
                 ),
-                "output_fps": (
-                    "FLOAT",
-                    {"default": 0.0, "min": 0.0, "max": 240.0, "step": 0.01},
-                ),
-                "crf": (
-                    "INT",
-                    {"default": 18, "min": 0, "max": 51, "step": 1},
-                ),
-                "preserve_audio": ("BOOLEAN", {"default": True}),
             },
             "optional": {
-                "verbose_log": ("BOOLEAN", {"default": True}),
+                "streaming_options": (STREAMING_OPTIONS_TYPE,),
             },
         }
 
@@ -294,15 +371,37 @@ class SAM2MattingVideoBackground:
         mask_threshold: float,
         background_color: str,
         state_device: str,
-        output_fps: float,
-        crf: int,
-        preserve_audio: bool,
+        streaming_options: dict | None = None,
+        # Kept as callable defaults so API-format workflows made before v1.4
+        # can still invoke the function by name after the widgets moved out.
+        output_fps: float = 0.0,
+        crf: int = 18,
+        preserve_audio: bool = True,
         verbose_log: bool = True,
     ):
         from comfy_api.latest import InputImpl
 
         if state_device not in ("gpu", "cpu"):
             raise ValueError("state_device must be 'gpu' or 'cpu'")
+        options = dict(DEFAULT_STREAMING_OPTIONS)
+        options.update(
+            {
+                "output_fps": float(output_fps),
+                "crf": int(crf),
+                "preserve_audio": bool(preserve_audio),
+                "verbose_log": bool(verbose_log),
+            }
+        )
+        if streaming_options is not None:
+            options.update(dict(streaming_options))
+        cache_mode = str(options["cache_mode"])
+        worker_threads = max(1, int(options["worker_threads"]))
+        pipeline_depth = max(1, int(options["pipeline_depth"]))
+        video_encoder = str(options["video_encoder"])
+        output_fps = float(options["output_fps"])
+        crf = int(options["crf"])
+        preserve_audio = bool(options["preserve_audio"])
+        verbose_log = bool(options["verbose_log"])
         background = parse_hex_color(background_color)
         temp_root = folder_paths.get_temp_directory()
         os.makedirs(temp_root, exist_ok=True)
@@ -323,12 +422,17 @@ class SAM2MattingVideoBackground:
         LOGGER.info(
             "[stream] Run started: variant=%s, configured_device=%s, "
             "predictor_device=%s, state_device=%s, bounded_state=true, "
-            "temporal_horizon=%d frames, output_fps=%s, preserve_audio=%s",
+            "temporal_horizon=%d frames, cache=%s, workers=%d, pipeline=%d, "
+            "encoder=%s, output_fps=%s, preserve_audio=%s",
             model.variant,
             configured_device,
             actual_device,
             state_device,
             _temporal_state_horizon(model.predictor),
+            cache_mode,
+            worker_threads,
+            pipeline_depth,
+            video_encoder,
             "source" if float(output_fps) <= 0.0 else float(output_fps),
             bool(preserve_audio),
         )
@@ -349,7 +453,10 @@ class SAM2MattingVideoBackground:
                 preparation_last_logged = 0
                 LOGGER.info(
                     "[stream] Stage 1/3 PREPARE started: CPU video decode, resize "
-                    "and JPEG tracking cache"
+                    "and %s tracking cache with %d workers / depth %d",
+                    cache_mode,
+                    worker_threads,
+                    pipeline_depth,
                 )
 
                 def preprocessing_progress(done: int, total: int) -> None:
@@ -378,6 +485,9 @@ class SAM2MattingVideoBackground:
                     path=work_path / "tracking.frames",
                     image_size=int(model.predictor.image_size),
                     kind=model.kind,
+                    cache_mode=cache_mode,
+                    worker_threads=worker_threads,
+                    pipeline_depth=pipeline_depth,
                     progress_callback=preprocessing_progress,
                     interrupt_callback=(
                         comfy.model_management.throw_exception_if_processing_interrupted
@@ -404,6 +514,8 @@ class SAM2MattingVideoBackground:
                     info.frame_count,
                     info.height,
                     info.width,
+                    worker_threads=worker_threads,
+                    queue_depth=pipeline_depth,
                 )
                 tracking_started = time.perf_counter()
                 tracking_last_logged = 0
@@ -469,8 +581,11 @@ class SAM2MattingVideoBackground:
                 encoding_started = time.perf_counter()
                 encoding_last_logged = 0
                 LOGGER.info(
-                    "[stream] Stage 3/3 ENCODE started: CPU compositing and H.264 "
-                    "encoding; GPU inference complete"
+                    "[stream] Stage 3/3 ENCODE started: bounded CPU compositing "
+                    "with %d workers / depth %d; requested_encoder=%s",
+                    worker_threads,
+                    pipeline_depth,
+                    video_encoder,
                 )
 
                 def encoding_progress(done: int, _total: int) -> None:
@@ -497,7 +612,7 @@ class SAM2MattingVideoBackground:
                         )
                         encoding_last_logged = done
 
-                encode_background_video(
+                actual_encoder = encode_background_video(
                     video=video,
                     alpha_store=alphas,
                     info=info,
@@ -507,6 +622,9 @@ class SAM2MattingVideoBackground:
                     output_fps=float(output_fps),
                     crf=int(crf),
                     preserve_audio=bool(preserve_audio),
+                    encoder=video_encoder,
+                    worker_threads=worker_threads,
+                    pipeline_depth=pipeline_depth,
                     progress_callback=encoding_progress,
                     interrupt_callback=(
                         comfy.model_management.throw_exception_if_processing_interrupted
@@ -517,9 +635,10 @@ class SAM2MattingVideoBackground:
                 )
                 LOGGER.info(
                     "[stream] Stage 3/3 ENCODE complete: %.1f source FPS, "
-                    "%.1fs elapsed, output=%.2f GiB",
+                    "%.1fs elapsed, encoder=%s, output=%.2f GiB",
                     encoding_rate,
                     encoding_elapsed,
+                    actual_encoder,
                     output_path.stat().st_size / (1024**3),
                 )
                 alphas.close()
@@ -618,6 +737,7 @@ NODE_CLASS_MAPPINGS = {
     "LoadSAM2MattingVideoModel": LoadSAM2MattingVideoModel,
     "SAM3TextPromptSeedMask": SAM3TextPromptSeedMask,
     "SAM2MattingVideo": SAM2MattingVideo,
+    "SAM2MattingStreamingOptions": SAM2MattingStreamingOptions,
     "SAM2MattingVideoBackground": SAM2MattingVideoBackground,
 }
 
@@ -626,5 +746,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LoadSAM2MattingVideoModel": "Load SAM2Matting Video Model",
     "SAM3TextPromptSeedMask": "SAM3 Text Prompt to Seed Mask",
     "SAM2MattingVideo": "SAM2Matting Video",
+    "SAM2MattingStreamingOptions": "SAM2Matting Streaming Options",
     "SAM2MattingVideoBackground": "SAM2Matting Video Background (Streaming)",
 }

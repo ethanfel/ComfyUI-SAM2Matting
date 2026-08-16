@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from streaming_video import (
+    TRACKING_CACHE_MODES,
     DiskAlphaStore,
     encode_background_video,
     parse_hex_color,
@@ -113,7 +114,7 @@ def test_native_video_pipeline_is_file_backed_and_encodes_solid_background(tmp_p
     for index in range(4):
         alphas.write(index, torch.zeros(12, 16))
     alphas.flush()
-    encode_background_video(
+    encoder = encode_background_video(
         video,
         alphas,
         info,
@@ -121,7 +122,11 @@ def test_native_video_pipeline_is_file_backed_and_encodes_solid_background(tmp_p
         output_path=output_path,
         video_only_path=video_only_path,
         preserve_audio=False,
+        encoder="libx264",
+        worker_threads=2,
+        pipeline_depth=2,
     )
+    assert encoder == "libx264"
 
     with av.open(str(output_path)) as container:
         decoded = [
@@ -132,6 +137,49 @@ def test_native_video_pipeline_is_file_backed_and_encodes_solid_background(tmp_p
 
     alphas.close()
     frames.close()
+
+
+def test_tracking_cache_modes_include_lossless_default_and_jpeg_opt_in(tmp_path):
+    source_path = tmp_path / "source.mp4"
+    _write_test_video(source_path)
+    video = FakeNativeVideo(source_path)
+    sequences = {}
+
+    for cache_mode in TRACKING_CACHE_MODES:
+        sequence, info = prepare_tracking_frames(
+            video,
+            tmp_path / f"tracking-{cache_mode}.frames",
+            image_size=8,
+            kind="sam2",
+            cache_mode=cache_mode,
+            worker_threads=2,
+            pipeline_depth=2,
+        )
+        assert info.frame_count == 4
+        sequences[cache_mode] = sequence
+
+    assert torch.equal(sequences["lossless_zstd"][0], sequences["raw_fast"][0])
+    assert tuple(sequences["jpeg_low_disk"][0].shape) == (3, 8, 8)
+    for sequence in sequences.values():
+        sequence.close()
+
+
+def test_alpha_store_async_writes_are_bounded_and_random_access(tmp_path):
+    store = DiskAlphaStore(
+        tmp_path / "alpha-async.frames",
+        frame_count=6,
+        height=12,
+        width=16,
+        worker_threads=3,
+        queue_depth=2,
+    )
+    for index in reversed(range(6)):
+        store.write(index, torch.full((12, 16), index / 5))
+    store.flush()
+
+    for index in range(6):
+        assert store.as_float(index).mean() == pytest.approx(index / 5, abs=1 / 255)
+    store.close()
 
 
 def test_native_video_pipeline_preserves_audio_without_buffering_a_tensor(tmp_path):

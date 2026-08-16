@@ -165,30 +165,50 @@ solid background color.
 - `state_device`:
   - `gpu`: recommended; keeps the tracker's temporal state out of system RAM
   - `cpu`: lowers VRAM use by keeping the bounded tracker state in system RAM
-- `output_fps`: `0` keeps the source FPS; a positive value converts FPS while
-  preserving duration by dropping or duplicating frames
-- `crf`: H.264 quality; lower is higher quality and larger
-- `preserve_audio`: transcodes the active source audio to AAC
-- `verbose_log`: reports all three stages, actual predictor/state devices,
-  frame progress, speed, elapsed time, cache sizes, and CUDA memory use
+- `streaming_options`: optional connection from **SAM2Matting Streaming
+  Options**. Leave it disconnected to use the recommended defaults.
 
-The log labels preprocessing as CPU-only, tracking as CUDA compute, and final
-compositing/encoding as CPU-only. This makes normal GPU-idle periods explicit
-and warns if the predictor parameters are unexpectedly not on CUDA.
+### SAM2Matting Streaming Options
+
+This separate node keeps performance and encoding controls off the main node:
+
+- `cache_mode`:
+  - `lossless_zstd`: default; exact model-resolution RGB with moderate disk use
+  - `jpeg_low_disk`: smallest cache, but JPEG slightly changes model input
+  - `raw_fast`: no compression; fastest when temporary disk space is plentiful
+- `worker_threads`: CPU workers used for preparation, matte compression, and
+  compositing
+- `pipeline_depth`: maximum queued work in each stage; raising it can improve
+  throughput but increases bounded RAM use
+- `video_encoder`: `auto` prefers NVIDIA NVENC and safely falls back to
+  `libx264`; either encoder can also be selected explicitly
+- `output_fps`: `0` keeps source FPS; a positive value converts FPS while
+  preserving duration
+- `crf`: output quality control; lower is higher quality and larger
+- `preserve_audio`: transcodes active source audio to AAC
+- `verbose_log`: reports stage progress, devices, throughput, cache sizes, and
+  CUDA memory
 
 The output is a file-backed native `VIDEO`, ready for ComfyUI's **Save Video**.
-During execution, model-resolution tracking frames are kept as compressed JPEG
-records and soft mattes as lossless 8-bit PNG records in ComfyUI's temporary
-directory. Only the current full-resolution source frame is composited in RAM.
+The streaming pipeline has three bounded stages:
+
+1. Decode, resize, and cache model-resolution frames. CPU workers overlap the
+   preparation work; lossless Zstandard is the default.
+2. Track sequentially on the model device. Frame reads are prefetched and alpha
+   PNG writes run asynchronously, but temporal inference itself remains ordered.
+3. Decode the source again, composite several frames in a bounded worker queue,
+   and encode with NVENC or libx264.
+
+Soft mattes remain lossless 8-bit PNG records in ComfyUI's temporary directory.
 Temporal outputs are limited to the model's active attention window (plus the
 seed-near window needed for reverse propagation), so tracking-state VRAM or RAM
 reaches a plateau instead of increasing for the complete clip.
 The temporary files are removed after encoding; the file backing the returned
 `VIDEO` remains until ComfyUI cleans its normal temporary directory.
 
-This trades temporary disk I/O and two sequential video decodes for predictable
-host memory. Temporary disk use still grows with clip length and image content.
-It does not split or reset the tracker, so temporal continuity is preserved.
+This trades temporary disk I/O and two video decodes for predictable host
+memory. Temporary disk use still grows with clip length and image content. It
+does not split or reset the tracker, so temporal continuity is preserved.
 
 ### SAM3 Text Prompt to Seed Mask
 
