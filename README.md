@@ -58,7 +58,7 @@ installation with the versions pinned by the upstream research repository.
 
 For removing a background and replacing it with a solid grey:
 
-1. Load the clip with ComfyUI's native **Load Video** node.
+1. Open the existing server-side clip with **Load Video Path (Native)**.
 2. Paint or generate one black-and-white seed mask. White is foreground.
 3. Load `sam2.1_base_plus` with **Load SAM2Matting Video Model**.
 4. Connect everything to **SAM2Matting Video Background (Streaming)**.
@@ -69,6 +69,12 @@ Drag
 [`example_workflows/sam2matting_video_background_streaming.json`](example_workflows/sam2matting_video_background_streaming.json)
 onto ComfyUI for this setup. It never converts the complete clip to an `IMAGE`
 or `MASK` batch, and it preserves source audio by default.
+
+ComfyUI's browser uploader defaults to a 100 MB request limit. The path loader
+bypasses that request completely: `video_path` must point to a file visible on
+the machine running ComfyUI. In Docker, use the path inside the container, not
+an unmounted host path. Small files can still use core **Load Video**. Raising
+ComfyUI's `--max-upload-size` is possible, but is unnecessary for this workflow.
 
 The original tensor node remains useful when the alpha matte must feed other
 ComfyUI image nodes. Load the video as one ordered `IMAGE` batch, then connect
@@ -107,6 +113,15 @@ Both examples are capped at 48 frames for a quick first test. Set
 - `variant`: `sam2.1_tiny`, `sam2.1_base_plus`, or `sam3`
 - `compile_model`: optionally compiles the image backbone; the first run can be
   slow
+
+### Load Video Path (Native)
+
+- `video_path`: absolute or working-directory-relative path on the ComfyUI
+  server/container
+
+It returns the same native `VIDEO` type as core **Load Video**, but does not
+copy the file through the browser or into ComfyUI's input directory. The file's
+modification time and size participate in ComfyUI cache invalidation.
 
 ### SAM2Matting Video
 

@@ -49,6 +49,51 @@ def _checkpoint_path(variant: str) -> str:
     return os.path.join(model_dirs[0], filename)
 
 
+class LoadSAM2MattingVideoPath:
+    """Open an existing server-side video as a native ComfyUI VIDEO."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "video_path": (
+                    "STRING",
+                    {"default": "/path/to/video.mp4", "multiline": False},
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("VIDEO",)
+    RETURN_NAMES = ("video",)
+    FUNCTION = "load"
+    CATEGORY = "SAM2Matting/video"
+    DESCRIPTION = (
+        "Opens a video that already exists on the machine running ComfyUI. "
+        "This avoids the browser upload-size limit and returns a file-backed "
+        "native VIDEO without decoding an IMAGE batch."
+    )
+
+    @classmethod
+    def IS_CHANGED(cls, video_path: str):
+        path = Path(video_path).expanduser()
+        try:
+            stat = path.stat()
+        except OSError:
+            return float("nan")
+        return f"{path.resolve()}:{stat.st_mtime_ns}:{stat.st_size}"
+
+    def load(self, video_path: str):
+        from comfy_api.latest import InputImpl
+
+        path = Path(video_path).expanduser().resolve()
+        if not path.is_file():
+            raise FileNotFoundError(
+                "Video path does not exist inside the ComfyUI machine/container: "
+                f"{path}"
+            )
+        return (InputImpl.VideoFromFile(str(path)),)
+
+
 class LoadSAM2MattingVideoModel:
     """Load a reusable official SAM2Matting temporal video predictor."""
 
@@ -385,6 +430,7 @@ class SAM3TextPromptSeedMask:
 
 
 NODE_CLASS_MAPPINGS = {
+    "LoadSAM2MattingVideoPath": LoadSAM2MattingVideoPath,
     "LoadSAM2MattingVideoModel": LoadSAM2MattingVideoModel,
     "SAM3TextPromptSeedMask": SAM3TextPromptSeedMask,
     "SAM2MattingVideo": SAM2MattingVideo,
@@ -392,6 +438,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "LoadSAM2MattingVideoPath": "Load Video Path (Native)",
     "LoadSAM2MattingVideoModel": "Load SAM2Matting Video Model",
     "SAM3TextPromptSeedMask": "SAM3 Text Prompt to Seed Mask",
     "SAM2MattingVideo": "SAM2Matting Video",

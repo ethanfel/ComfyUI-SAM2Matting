@@ -59,7 +59,11 @@ def test_streaming_workflow_never_converts_native_video_to_an_image_batch():
     node_types = {node["type"] for node in workflow["nodes"]}
     streaming = _node(workflow, 4)
 
-    assert {"LoadVideo", "SAM2MattingVideoBackground", "SaveVideo"} <= node_types
+    assert {
+        "LoadSAM2MattingVideoPath",
+        "SAM2MattingVideoBackground",
+        "SaveVideo",
+    } <= node_types
     assert "GetVideoComponents" not in node_types
     assert [output["type"] for output in streaming["outputs"]] == ["VIDEO"]
 

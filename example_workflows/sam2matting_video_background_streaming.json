@@ -16,7 +16,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "SAM2Matting — streaming grey-background workflow\n\n1. Upload a native video and a black/white seed mask. White = foreground.\n2. The seed mask must match mask_frame (zero-based).\n3. background_color defaults to middle grey (#808080).\n4. gpu keeps temporal state on the GPU; cpu trades VRAM for system RAM.\n\nThe node streams frames through compressed temporary files and returns a native VIDEO. It does not create a full IMAGE or MASK batch. Save Video writes the H.264 result."
+        "SAM2Matting — streaming grey-background workflow\n\n1. Enter a video path that exists inside the ComfyUI machine/container, then load a black/white seed mask. White = foreground.\n2. The seed mask must match mask_frame (zero-based).\n3. background_color defaults to middle grey (#808080).\n4. gpu keeps temporal state on the GPU; cpu trades VRAM for system RAM.\n\nThe path loader bypasses ComfyUI's browser upload-size limit. The node streams frames through compressed temporary files and returns a native VIDEO without creating a full IMAGE or MASK batch."
       ],
       "color": "#243447",
       "bgcolor": "#34506b"
@@ -44,23 +44,23 @@
     },
     {
       "id": 2,
-      "type": "LoadVideo",
+      "type": "LoadSAM2MattingVideoPath",
       "pos": [0, 192],
       "size": [352, 320],
       "flags": {},
       "order": 2,
       "mode": 0,
       "inputs": [
-        {"name": "file", "type": "COMBO", "widget": {"name": "file"}, "link": null}
+        {"name": "video_path", "type": "STRING", "widget": {"name": "video_path"}, "link": null}
       ],
       "outputs": [
         {"name": "VIDEO", "type": "VIDEO", "slot_index": 0, "links": [2]}
       ],
       "properties": {
-        "cnr_id": "comfy-core",
-        "Node name for S&R": "LoadVideo"
+        "aux_id": "ethanfel/ComfyUI-SAM2Matting",
+        "Node name for S&R": "LoadSAM2MattingVideoPath"
       },
-      "widgets_values": ["input_video.mp4"]
+      "widgets_values": ["/path/to/video.mp4"]
     },
     {
       "id": 3,
