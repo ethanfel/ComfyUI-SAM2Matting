@@ -3,8 +3,9 @@
 Video matting for ComfyUI using
 [FudanCVL SAM2Matting](https://github.com/FudanCVL/SAM2Matting).
 
-Give the node a video and one rough foreground mask. It tracks the selected
-subject through the clip and returns a soft alpha matte.
+Give the streaming node a video and one rough foreground mask. It tracks the
+selected subject through the clip and returns both a composited video and a
+lossless white-on-black matte video without building a full-frame tensor batch.
 
 ## Which model should I use?
 
@@ -66,9 +67,10 @@ For removing a background and replacing it with a solid grey:
    `mask_frame`, and connect its native `VIDEO` output to **Save Video**.
 
 Drag
-[`example_workflows/sam2matting_video_background_streaming.json`](example_workflows/sam2matting_video_background_streaming.json)
+[`example_workflows/sam2matting_video_default.json`](example_workflows/sam2matting_video_default.json)
 onto ComfyUI for this setup. It never converts the complete clip to an `IMAGE`
-or `MASK` batch, and it preserves source audio by default.
+or `MASK` batch, preserves source audio on the composite by default, and saves
+both the grey-background result and the white-on-black matte.
 
 ComfyUI's browser uploader defaults to a 100 MB request limit. The path loader
 bypasses that request completely: `video_path` must point to a file visible on
@@ -89,7 +91,7 @@ With SAM3, **SAM3 Text Prompt to Seed Mask** can replace the painted mask:
 4. Inspect the prompt node's preview before running the complete clip.
 
 For the tensor/transparent-output example, drag
-[`example_workflows/sam2matting_video_default.json`](example_workflows/sam2matting_video_default.json)
+[`example_workflows/sam2matting_video_tensor_alpha.json`](example_workflows/sam2matting_video_tensor_alpha.json)
 onto ComfyUI. It uses
 [Video Helper Suite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)
 and produces a transparent VP9 WebM plus a black-background/white-foreground
@@ -103,7 +105,7 @@ frame, shows that single-frame preview, and passes both the mask and matching
 frame index into temporal matting. The temporal node returns only its alpha
 batch.
 
-Both examples are capped at 48 frames for a quick first test. Set
+The tensor and SAM3 examples are capped at 48 frames for a quick first test. Set
 `frame_load_cap` to `0` to process the complete video.
 
 ## Nodes
@@ -123,7 +125,11 @@ It returns the same native `VIDEO` type as core **Load Video**, but does not
 copy the file through the browser or into ComfyUI's input directory. The file's
 modification time and size participate in ComfyUI cache invalidation.
 
-### SAM2Matting Video
+### SAM2Matting Video (Tensor / advanced)
+
+Use this node only when the propagated alpha must enter other ComfyUI
+`IMAGE`/`MASK` processing. For background replacement or matte-video export,
+the streaming node is the recommended main path.
 
 Inputs:
 
@@ -192,7 +198,13 @@ This separate node keeps performance and encoding controls off the main node:
   temporal median. `0` disables it; `0.35` is the gentle default. Higher values
   reduce more flicker but can flatten very fast, thin, or translucent details.
 
-The output is a file-backed native `VIDEO`, ready for ComfyUI's **Save Video**.
+Outputs are file-backed native videos, ready for ComfyUI's **Save Video**:
+
+- `video`: the foreground composited over `background_color` as H.264 MP4
+- `matte_video`: a lossless FFV1 matte with white foreground, black background,
+  and soft gray edge opacity; it contains no audio
+
+Neither output constructs a full ComfyUI `IMAGE` or `MASK` batch.
 The streaming pipeline has three bounded stages:
 
 1. Decode, resize, and cache model-resolution frames. CPU workers overlap the
@@ -200,8 +212,8 @@ The streaming pipeline has three bounded stages:
 2. Track sequentially on the model device. Frame reads are prefetched and alpha
    PNG writes run asynchronously, but temporal inference itself remains ordered.
 3. Stabilize each alpha from only its two neighboring disk-backed mattes, decode
-   the source again, composite in a bounded worker queue, and encode with NVENC
-   or libx264.
+   the source again, composite in a bounded worker queue, and encode the color
+   result with NVENC or libx264 alongside a lossless white-on-black matte video.
 
 Soft mattes remain lossless 8-bit PNG records in ComfyUI's temporary directory.
 Temporal outputs are limited to the model's active attention window (plus the

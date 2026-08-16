@@ -8,6 +8,7 @@ import os
 import threading
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import ExitStack
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -483,6 +484,7 @@ def _encode_video_only(
     info: VideoInfo,
     background: tuple[int, int, int],
     output_path: str | os.PathLike[str],
+    matte_output_path: str | os.PathLike[str] | None,
     output_fps: float,
     crf: int,
     encoder: str,
@@ -506,12 +508,15 @@ def _encode_video_only(
         1,
         int(round(Fraction(info.frame_count) * output_rate / info.frame_rate)),
     )
-    with av.open(
-        str(output_path),
-        mode="w",
-        format="mp4",
-        options={"movflags": "use_metadata_tags+faststart"},
-    ) as output:
+    with ExitStack() as stack:
+        output = stack.enter_context(
+            av.open(
+                str(output_path),
+                mode="w",
+                format="mp4",
+                options={"movflags": "use_metadata_tags+faststart"},
+            )
+        )
         stream = output.add_stream(encoder, rate=output_rate)
         stream.width = info.width
         stream.height = info.height
@@ -522,34 +527,54 @@ def _encode_video_only(
             else {"crf": str(int(crf))}
         )
         stream.codec_context.max_b_frames = 0
+        matte_output = None
+        matte_stream = None
+        if matte_output_path is not None:
+            matte_output = stack.enter_context(
+                av.open(str(matte_output_path), mode="w", format="matroska")
+            )
+            matte_stream = matte_output.add_stream("ffv1", rate=output_rate)
+            matte_stream.width = info.width
+            matte_stream.height = info.height
+            matte_stream.pix_fmt = "gray"
+            matte_stream.codec_context.max_b_frames = 0
         time_base = Fraction(output_rate.denominator, output_rate.numerator)
         encoded = 0
         decoded = 0
         scheduled = 0
-        pending: deque[tuple[int, int, Future[np.ndarray]]] = deque()
+        pending: deque[
+            tuple[int, int, Future[tuple[np.ndarray, np.ndarray]]]
+        ] = deque()
 
-        def composite_frame(frame_index: int, rgb: np.ndarray) -> np.ndarray:
-            return _composite_rgb(
-                rgb,
-                _temporally_stabilized_alpha(
-                    alpha_store,
-                    frame_index,
-                    info.frame_count,
-                    edge_stabilization,
-                ),
-                background,
+        def composite_frame(
+            frame_index: int,
+            rgb: np.ndarray,
+        ) -> tuple[np.ndarray, np.ndarray]:
+            alpha = _temporally_stabilized_alpha(
+                alpha_store,
+                frame_index,
+                info.frame_count,
+                edge_stabilization,
             )
+            matte = np.clip(np.rint(alpha * 255.0), 0, 255).astype(np.uint8)
+            return _composite_rgb(rgb, alpha, background), matte
 
         def encode_next() -> None:
             nonlocal encoded
             _frame_index, repeat_count, future = pending.popleft()
-            composited = future.result()
+            composited, matte = future.result()
             for _repeat in range(repeat_count):
                 frame = av.VideoFrame.from_ndarray(composited, format="rgb24")
                 frame.pts = encoded
                 frame.time_base = time_base
                 for packet in stream.encode(frame):
                     output.mux(packet)
+                if matte_stream is not None and matte_output is not None:
+                    matte_frame = av.VideoFrame.from_ndarray(matte, format="gray")
+                    matte_frame.pts = encoded
+                    matte_frame.time_base = time_base
+                    for packet in matte_stream.encode(matte_frame):
+                        matte_output.mux(packet)
                 encoded += 1
 
         worker_threads = max(1, int(worker_threads))
@@ -602,6 +627,9 @@ def _encode_video_only(
             )
         for packet in stream.encode(None):
             output.mux(packet)
+        if matte_stream is not None and matte_output is not None:
+            for packet in matte_stream.encode(None):
+                matte_output.mux(packet)
     return VideoInfo(output_frame_count, info.width, info.height, output_rate)
 
 
@@ -764,6 +792,7 @@ def encode_background_video(
     edge_stabilization: float = 0.0,
     progress_callback: ProgressCallback | None = None,
     interrupt_callback: InterruptCallback | None = None,
+    matte_output_path: str | os.PathLike[str] | None = None,
 ) -> str:
     """Composite and encode without constructing an IMAGE batch."""
     if encoder not in VIDEO_ENCODERS:
@@ -783,6 +812,8 @@ def encode_background_video(
     actual_encoder = candidates[0]
     for candidate in candidates:
         Path(video_only_path).unlink(missing_ok=True)
+        if matte_output_path is not None:
+            Path(matte_output_path).unlink(missing_ok=True)
         try:
             output_info = _encode_video_only(
                 video,
@@ -790,6 +821,7 @@ def encode_background_video(
                 info,
                 background,
                 video_only_path,
+                matte_output_path,
                 output_fps,
                 crf,
                 candidate,

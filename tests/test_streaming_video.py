@@ -97,6 +97,7 @@ def test_native_video_pipeline_is_file_backed_and_encodes_solid_background(tmp_p
     alpha_path = tmp_path / "alpha.frames"
     video_only_path = tmp_path / "video-only.mp4"
     output_path = tmp_path / "output.mp4"
+    matte_output_path = tmp_path / "matte.mkv"
     _write_test_video(source_path)
     video = FakeNativeVideo(source_path)
 
@@ -122,6 +123,7 @@ def test_native_video_pipeline_is_file_backed_and_encodes_solid_background(tmp_p
         background=(128, 128, 128),
         output_path=output_path,
         video_only_path=video_only_path,
+        matte_output_path=matte_output_path,
         preserve_audio=False,
         encoder="libx264",
         worker_threads=2,
@@ -135,6 +137,13 @@ def test_native_video_pipeline_is_file_backed_and_encodes_solid_background(tmp_p
         ]
     assert len(decoded) == 4
     assert np.asarray(decoded).mean() == pytest.approx(128, abs=5)
+
+    with av.open(str(matte_output_path)) as container:
+        matte_frames = [
+            frame.to_ndarray(format="gray") for frame in container.decode(video=0)
+        ]
+    assert len(matte_frames) == 4
+    assert np.asarray(matte_frames).mean() == 0
 
     alphas.close()
     frames.close()
@@ -235,6 +244,45 @@ def test_native_video_pipeline_preserves_audio_without_buffering_a_tensor(tmp_pa
         assert len(container.streams.video) == 1
         assert len(container.streams.audio) == 1
         assert sum(frame.samples for frame in container.decode(audio=0)) > 0
+
+    alphas.close()
+    frames.close()
+
+
+def test_streaming_matte_video_preserves_soft_alpha_losslessly(tmp_path):
+    source_path = tmp_path / "source.mp4"
+    _write_test_video(source_path)
+    video = FakeNativeVideo(source_path)
+    frames, info = prepare_tracking_frames(
+        video,
+        tmp_path / "tracking.frames",
+        image_size=8,
+        kind="sam2",
+    )
+    alphas = DiskAlphaStore(tmp_path / "alpha.frames", 4, 12, 16)
+    for index, value in enumerate((0, 64, 128, 255)):
+        alphas.write(index, torch.full((12, 16), value / 255.0))
+    alphas.flush()
+    matte_output_path = tmp_path / "matte.mkv"
+
+    encode_background_video(
+        video,
+        alphas,
+        info,
+        background=(128, 128, 128),
+        output_path=tmp_path / "output.mp4",
+        video_only_path=tmp_path / "video-only.mp4",
+        matte_output_path=matte_output_path,
+        preserve_audio=False,
+        encoder="libx264",
+        edge_stabilization=0.0,
+    )
+
+    with av.open(str(matte_output_path)) as container:
+        decoded = [
+            frame.to_ndarray(format="gray") for frame in container.decode(video=0)
+        ]
+    assert [int(frame.mean()) for frame in decoded] == [0, 64, 128, 255]
 
     alphas.close()
     frames.close()

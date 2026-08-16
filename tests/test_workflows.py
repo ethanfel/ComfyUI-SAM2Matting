@@ -6,13 +6,14 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW_PATHS = (
-    REPO_ROOT / "example_workflows" / "sam2matting_video_default.json",
-    REPO_ROOT / "example_workflows" / "sam3_text_prompt_video.json",
-    REPO_ROOT / "example_workflows" / "sam2matting_video_background_streaming.json",
+STREAMING_WORKFLOW_PATH = (
+    REPO_ROOT / "example_workflows" / "sam2matting_video_default.json"
 )
-
-TENSOR_WORKFLOW_PATHS = WORKFLOW_PATHS[:2]
+TENSOR_WORKFLOW_PATHS = (
+    REPO_ROOT / "example_workflows" / "sam2matting_video_tensor_alpha.json",
+    REPO_ROOT / "example_workflows" / "sam3_text_prompt_video.json",
+)
+WORKFLOW_PATHS = (STREAMING_WORKFLOW_PATH, *TENSOR_WORKFLOW_PATHS)
 
 
 def _load_workflow(path: Path) -> dict:
@@ -55,7 +56,7 @@ def test_example_workflow_reuses_video_and_matting_returns_only_alpha(path):
 
 
 def test_streaming_workflow_never_converts_native_video_to_an_image_batch():
-    workflow = _load_workflow(WORKFLOW_PATHS[2])
+    workflow = _load_workflow(STREAMING_WORKFLOW_PATH)
     node_types = {node["type"] for node in workflow["nodes"]}
     streaming = _node(workflow, 4)
 
@@ -65,7 +66,14 @@ def test_streaming_workflow_never_converts_native_video_to_an_image_batch():
         "SaveVideo",
     } <= node_types
     assert "GetVideoComponents" not in node_types
-    assert [output["type"] for output in streaming["outputs"]] == ["VIDEO"]
+    assert [output["type"] for output in streaming["outputs"]] == [
+        "VIDEO",
+        "VIDEO",
+    ]
+    assert [output["name"] for output in streaming["outputs"]] == [
+        "video",
+        "matte_video",
+    ]
 
     options = next(
         node

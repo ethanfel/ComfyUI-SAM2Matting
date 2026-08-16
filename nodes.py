@@ -512,18 +512,20 @@ class SAM2MattingVideoBackground:
             },
         }
 
-    RETURN_TYPES = ("VIDEO",)
-    RETURN_NAMES = ("video",)
+    RETURN_TYPES = ("VIDEO", "VIDEO")
+    RETURN_NAMES = ("video", "matte_video")
     OUTPUT_TOOLTIPS = (
         "File-backed H.264 MP4 with the tracked foreground composited over the chosen color.",
+        "File-backed lossless matte video: white foreground, black background, and soft gray edges.",
     )
     FUNCTION = "composite"
     CATEGORY = "SAM2Matting/video"
     DESCRIPTION = (
         "Streams a native ComfyUI VIDEO through temporal matting, composites the "
-        "foreground over a solid color, and returns a native H.264 VIDEO. Tracking "
-        "frames and mattes are disk-backed, so host RAM does not grow with the "
-        "full-resolution clip length. Connect the result to ComfyUI Save Video."
+        "foreground over a solid color, and returns both that native H.264 VIDEO "
+        "and a lossless white-on-black matte VIDEO. Tracking frames and mattes "
+        "are disk-backed, so host RAM does not grow with the full-resolution clip "
+        "length. Connect either result to ComfyUI Save Video."
     )
 
     def composite(
@@ -580,6 +582,13 @@ class SAM2MattingVideoBackground:
             delete=False,
         ) as output_file:
             output_path = Path(output_file.name)
+        with NamedTemporaryFile(
+            prefix="sam2matting_matte_",
+            suffix=".mkv",
+            dir=temp_root,
+            delete=False,
+        ) as matte_output_file:
+            matte_output_path = Path(matte_output_file.name)
 
         progress = comfy.utils.ProgressBar(1)
         frames = None
@@ -788,6 +797,7 @@ class SAM2MattingVideoBackground:
                     background=background,
                     output_path=output_path,
                     video_only_path=work_path / "composited_video.mp4",
+                    matte_output_path=matte_output_path,
                     output_fps=float(output_fps),
                     crf=int(crf),
                     preserve_audio=bool(preserve_audio),
@@ -805,11 +815,12 @@ class SAM2MattingVideoBackground:
                 )
                 LOGGER.info(
                     "[stream] Stage 3/3 ENCODE complete: %.1f source FPS, "
-                    "%.1fs elapsed, encoder=%s, output=%.2f GiB",
+                    "%.1fs elapsed, encoder=%s, composite=%.2f GiB, matte=%.2f GiB",
                     encoding_rate,
                     encoding_elapsed,
                     actual_encoder,
                     output_path.stat().st_size / (1024**3),
+                    matte_output_path.stat().st_size / (1024**3),
                 )
                 alphas.close()
                 alphas = None
@@ -823,6 +834,7 @@ class SAM2MattingVideoBackground:
                 exc,
             )
             output_path.unlink(missing_ok=True)
+            matte_output_path.unlink(missing_ok=True)
             raise
         finally:
             if alphas is not None:
@@ -831,10 +843,13 @@ class SAM2MattingVideoBackground:
                 frames.close()
 
         LOGGER.info(
-            "[stream] Run complete in %.1fs; result is a file-backed native VIDEO",
+            "[stream] Run complete in %.1fs; results are file-backed native VIDEOs",
             time.perf_counter() - run_started,
         )
-        return (InputImpl.VideoFromFile(str(output_path)),)
+        return (
+            InputImpl.VideoFromFile(str(output_path)),
+            InputImpl.VideoFromFile(str(matte_output_path)),
+        )
 
 
 class SAM3TextPromptSeedMask:
